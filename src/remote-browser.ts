@@ -9,17 +9,7 @@ export interface RemoteBrowserStartOptions {
   quality: number;
   fps: number;
   onFrame: (base64: string) => void;
-  onClipboard?: (ev: { action: "copy" | "cut"; text: string }) => void; // <-- NUEVO
-}
-
-export interface RemoteBrowserStartOptions {
-  url: string;
-  width: number;
-  height: number;
-  headful: boolean;
-  quality: number;
-  fps: number;
-  onFrame: (base64: string) => void;
+  onClipboard?: (ev: { action: "copy" | "cut"; text: string }) => void;
 }
 
 /**
@@ -35,6 +25,8 @@ export class RemoteBrowser {
   private deviceHeight = 720;
   private pageScale = 1;
   private jpegQuality = 60;
+
+  private clipGranted = false; // track permissions
 
   async start(opts: RemoteBrowserStartOptions): Promise<true> {
     try {
@@ -56,6 +48,7 @@ export class RemoteBrowser {
       this.page = await ctx.newPage();
       await this.page.goto(opts.url, { waitUntil: "domcontentloaded" });
 
+      // CDP session + screencast
       this.cdp = await this.page.target().createCDPSession();
       await this.cdp.send("Page.enable");
 
@@ -95,7 +88,7 @@ export class RemoteBrowser {
         (function(){
           function getSel() {
             try { return (window.getSelection && window.getSelection().toString()) || ""; } catch { return ""; }
-          }
+            }
           function emit(action, text) {
             try { window.__vwbClipboardOut && window.__vwbClipboardOut({ action, text: text || "" }); } catch {}
           }
@@ -241,6 +234,98 @@ export class RemoteBrowser {
     } catch (error) {
       console.error(error);
       throw new Error("RB_CAPTURE_FAIL");
+    }
+  }
+
+  /**
+   * Ensure clipboard permissions for current origin.
+   * Uses Puppeteer overridePermissions (web-permissions strings).
+   */
+  async ensureClipboardPermissions(): Promise<true> {
+    try {
+      if (this.clipGranted) return true;
+      if (!this.browser || !this.page) throw new Error("NO_PAGE");
+      const ctx = this.browser.defaultBrowserContext();
+      const origin = new URL(this.page.url()).origin;
+      try {
+        await ctx.overridePermissions(origin, [
+          "clipboard-read",
+          "clipboard-write",
+          "clipboard-sanitized-write", // might be ignored in some versions
+        ]);
+      } catch {
+        // fallback: at least read/write
+        await ctx.overridePermissions(origin, [
+          "clipboard-read",
+          "clipboard-write",
+        ]);
+      }
+      this.clipGranted = true;
+      return true;
+    } catch (error) {
+      console.error(error);
+      throw new Error("RB_CLIP_PERM_FAIL");
+    }
+  }
+
+  /**
+   * Clear and set remote clipboard to `text` using navigator.clipboard.
+   * Avoids async/await inside page context to prevent __awaiter issues.
+   */
+  async setClipboardText(text: string): Promise<true> {
+    try {
+      if (!this.page) throw new Error("NO_PAGE");
+      await this.ensureClipboardPermissions();
+
+      // IMPORTANT: do not use "async" in the page function (TS would inject __awaiter).
+      await this.page.evaluate((t: string) => {
+        // Promise chain only; no async/await here
+        return navigator.clipboard
+          .writeText("") // clear first
+          .catch(() => void 0) // ignore clear errors
+          .then(() => navigator.clipboard.writeText(t || "")); // write new text
+      }, text);
+
+      return true;
+    } catch (error) {
+      console.error(error);
+      throw new Error("RB_CLIP_SET_FAIL");
+    }
+  }
+
+  /**
+   * Perform a real paste (Ctrl/Cmd+V) after ensuring the remote clipboard equals `text`.
+   * Falls back to Input.insertText if something blocks clipboard write.
+   */
+  async pasteFromClipboard(text: string): Promise<true> {
+    try {
+      if (!this.page) throw new Error("NO_PAGE");
+      try {
+        await this.setClipboardText(text);
+        const isMac = process.platform === "darwin";
+        if (isMac) {
+          await this.page.keyboard.down("Meta");
+          await this.page.keyboard.press("v");
+          await this.page.keyboard.up("Meta");
+        } else {
+          await this.page.keyboard.down("Control");
+          await this.page.keyboard.press("v");
+          await this.page.keyboard.up("Control");
+        }
+        return true;
+      } catch (permOrWriteErr) {
+        // Fallback: direct insert (won't fire paste handlers but evita concatenación)
+        try {
+          await this.getCDP().send("Input.insertText", { text });
+          return true;
+        } catch (insertErr) {
+          console.error(insertErr);
+          throw new Error("RB_PASTE_FAIL");
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      throw new Error("RB_PASTE_FAIL");
     }
   }
 }
