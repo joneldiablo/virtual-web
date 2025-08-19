@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Virtual Web Browser</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b0b0b;
+        color: #eaeaea;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Ubuntu;
+      }
+      #topbar {
+        padding: 10px 14px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        border-bottom: 1px solid #222;
+      }
+      .badge {
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        background: #222;
+      }
+      .ok {
+        background: #123f1f;
+        color: #aef3c3;
+      }
+      .fail {
+        background: #3f1212;
+        color: #f3aeae;
+      }
+      #screen {
+        display: block;
+        width: 100vw;
+        height: calc(100vh - 48px);
+        object-fit: contain;
+        background: #111;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="topbar">
+      <span>HTTP:</span> <span id="http-status" class="badge">checking…</span>
+      <span>WS:</span> <span id="ws-status" class="badge">checking…</span>
+      <span>Clients:</span> <span id="ws-clients" class="badge">-</span>
+    </div>
+    <canvas id="screen"></canvas>
+
+    <script type="module">
+      // --- UI imports ---
+      import { attachFrameRenderer } from "./viewer.js";
+      import { attachClient } from "./client.js";
+
+      // --- DOM refs ---
+      const httpBadge = document.getElementById("http-status");
+      const wsBadge = document.getElementById("ws-status");
+      const wsClients = document.getElementById("ws-clients");
+      const canvas = document.getElementById("screen");
+
+      // --- helpers ---
+      const httpBase = location.origin; // http://host:port
+      const setBadge = (el, state, text) => {
+        el.classList.remove("ok", "fail");
+        if (state) el.classList.add(state);
+        el.textContent = text;
+      };
+
+      // --- health checks ---
+      async function checkHttpHealth() {
+        try {
+          const res = await fetch(httpBase + "/health", { cache: "no-store" });
+          const data = await res.json();
+          setBadge(httpBadge, data.ok ? "ok" : "fail", data.ok ? "OK" : "DOWN");
+          return !!data.ok;
+        } catch {
+          setBadge(httpBadge, "fail", "DOWN");
+          return false;
+        }
+      }
+      async function checkWsHealth() {
+        try {
+          const res = await fetch(httpBase + "/ws/health", {
+            cache: "no-store",
+          });
+          const data = await res.json();
+          setBadge(wsBadge, data.ok ? "ok" : "fail", data.ok ? "OPEN" : "DOWN");
+          wsClients.textContent =
+            typeof data.clients === "number" ? String(data.clients) : "-";
+          return !!data.ok;
+        } catch {
+          setBadge(wsBadge, "fail", "DOWN");
+          wsClients.textContent = "-";
+          return false;
+        }
+      }
+      async function pollHealth() {
+        await Promise.all([checkHttpHealth(), checkWsHealth()]);
+      }
+
+      // --- viewer ---
+      const { render, fit, getLayout } = attachFrameRenderer(canvas);
+      addEventListener("resize", fit, { passive: true });
+      fit();
+
+      // --- client (inputs + frames) ---
+      const ctrl = attachClient({
+        canvas,
+        getLayout,
+        // Marca estado WS vía hooks (si tu client.js ya soporta estos; abajo dejo patch)
+        onOpen: () => setBadge(wsBadge, "ok", "OPEN"),
+        onClose: () => setBadge(wsBadge, "fail", "CLOSED"),
+        onError: () => setBadge(wsBadge, "fail", "ERROR"),
+        onMessage: async (data) => {
+          // Si llega JSON...
+          try {
+            const msg = typeof data === "string" ? JSON.parse(data) : undefined;
+            if (msg && msg.type === "frame" && msg.payload) {
+              await render(msg.payload);
+              return;
+            }
+            if (
+              msg &&
+              msg.type === "hello" &&
+              msg.payload &&
+              typeof msg.payload.clients === "number"
+            ) {
+              wsClients.textContent = String(msg.payload.clients);
+              return;
+            }
+            if (msg && msg.type === "error") {
+              setBadge(wsBadge, "fail", "ERROR");
+              return;
+            }
+          } catch {
+            // No era JSON → asume base64 JPEG crudo
+            await render(data);
+          }
+        },
+      });
+
+      // Ping de vida (debug)
+      setTimeout(() => ctrl.send({ type: "ping" }), 1500);
+
+      // Arranca el polling
+      pollHealth();
+      setInterval(pollHealth, 4000);
+    </script>
+  </body>
+</html>
