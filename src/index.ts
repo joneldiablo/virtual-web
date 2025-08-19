@@ -44,7 +44,7 @@ const args = yargs(hideBin(process.argv))
   })
   .option("fps", {
     type: "number",
-    default: Number(process.env.FPS) || 24,
+    default: Number(process.env.FPS) || 48,
     describe: "Frames per second (reserved)",
   })
   .option("headful", {

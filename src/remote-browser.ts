@@ -9,6 +9,17 @@ export interface RemoteBrowserStartOptions {
   quality: number;
   fps: number;
   onFrame: (base64: string) => void;
+  onClipboard?: (ev: { action: "copy" | "cut"; text: string }) => void; // <-- NUEVO
+}
+
+export interface RemoteBrowserStartOptions {
+  url: string;
+  width: number;
+  height: number;
+  headful: boolean;
+  quality: number;
+  fps: number;
+  onFrame: (base64: string) => void;
 }
 
 /**
@@ -67,6 +78,57 @@ export class RemoteBrowser {
         } catch (err) {
           console.error("[rb] frame error:", err);
         }
+      });
+
+      // Expose a bridge to send clipboard out to Node
+      await this.page!.exposeFunction(
+        "__vwbClipboardOut",
+        (payload: { action: "copy" | "cut"; text: string }) => {
+          try {
+            opts.onClipboard && opts.onClipboard(payload);
+          } catch {}
+        }
+      );
+
+      // Attach listeners for current page and for all future docs
+      const injectClipboardHooks = () => `
+        (function(){
+          function getSel() {
+            try { return (window.getSelection && window.getSelection().toString()) || ""; } catch { return ""; }
+          }
+          function emit(action, text) {
+            try { window.__vwbClipboardOut && window.__vwbClipboardOut({ action, text: text || "" }); } catch {}
+          }
+          document.addEventListener("copy", function(e){
+            try {
+              let txt = "";
+              try { txt = e.clipboardData && e.clipboardData.getData("text/plain"); } catch {}
+              if (!txt) txt = getSel();
+              emit("copy", txt);
+            } catch {}
+          }, true);
+          document.addEventListener("cut", function(e){
+            try {
+              let txt = "";
+              try { txt = e.clipboardData && e.clipboardData.getData("text/plain"); } catch {}
+              if (!txt) txt = getSel();
+              emit("cut", txt);
+            } catch {}
+          }, true);
+        })();
+      `;
+
+      await this.page!.evaluateOnNewDocument(injectClipboardHooks());
+      try {
+        await this.page!.evaluate(injectClipboardHooks());
+      } catch {}
+
+      // Optionally, hook frames as they navigate (best-effort same-origin)
+      this.page!.on("framenavigated", async (frame) => {
+        try {
+          if (frame === this.page!.mainFrame()) return; // subframes only
+          await frame.evaluate(injectClipboardHooks());
+        } catch {}
       });
 
       this.running = true;
