@@ -18,6 +18,7 @@ interface CliArgs {
   width: number;
   height: number;
   token: string;
+  env: "PROD" | "DEV" | "DEBUG" | "TESTING";
   _: (string | number)[];
   $0: string;
 }
@@ -83,6 +84,8 @@ const args = yargs(hideBin(process.argv))
  */
 const main = async (cli: CliArgs) => {
   try {
+    process.env.ENV = cli.env;
+    console.log("Running as", process.env.ENV);
     console.log("Start server....");
     const httpCtrl = createHttpServer({ port: cli.port });
     await httpCtrl.ready;

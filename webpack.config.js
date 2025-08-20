@@ -86,7 +86,7 @@ module.exports = {
   entry: "./dist/cjs/cli.js",
   target: "async-node",
   mode: "production",
-  devtool: "source-map",
+  devtool: "hidden-source-map",
   module: {
     rules: [{ test: /\.node$/, use: "node-loader" }],
   },

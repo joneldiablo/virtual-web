@@ -69,14 +69,15 @@
   },
   "scripts": {
     "start": "ENV=PROD node dist/cjs/cli.js",
-    "start:dev": "ENV=DEV dotenv -e .env -- ts-node-dev --respawn --transpile-only src/index.ts",
-    "start:debug": "ENV=DEBUG dotenv -e .env -- node dist/cjs",
+    "start:dev": "ENV=DEV dotenv -e .env -- ts-node-dev --respawn --transpile-only src/cli.ts",
+    "start:debug": "ENV=DEBUG dotenv -e .env -- node dist/cjs/cli.js",
     "build:cjs": "tsc -p tsconfig.json",
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:bin": "rm -rf bin/* && webpack",
     "build": "rm -rf dist/* && yarn build:cjs && yarn build:esm && yarn build:bin && typedoc",
     "test": "jest",
-    "test:e2e": "jest --config ./e2e/jest-e2e.json --forceExit"
+    "test:e2e": "jest --config ./e2e/jest-e2e.json --forceExit",
+    "release": "./release.sh"
   },
   "author": "joneldiablo",
   "license": "ISC",
