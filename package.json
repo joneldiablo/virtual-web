@@ -1,6 +1,6 @@
 {
   "name": "virtual-web-browser",
-  "version": "1.0.0-dev",
+  "version": "1.0.1",
   "description": "Virtual Web Browser",
   "main": "dist/cjs/index.js",
   "bin": {
@@ -26,6 +26,12 @@
       "require": "./dist/cjs/http-server.js",
       "types": "./dist/types/http-server.d.ts",
       "source": "./src/js/http-server.ts"
+    },
+    "./index": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js",
+      "types": "./dist/types/index.d.ts",
+      "source": "./src/js/index.ts"
     },
     "./keyboard": {
       "import": "./dist/esm/keyboard.js",
