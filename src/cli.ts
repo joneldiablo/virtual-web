@@ -60,6 +60,12 @@ const args = yargs(hideBin(process.argv))
     default: process.env.ENV || "PROD",
     describe: "Enviroment variable helper for testing/debug/development",
   })
+  .option("publicDir", {
+    type: "string",
+    default: process.env.PUBLIC_DIR || "", // <- NEW (permite override por env)
+    describe:
+      "Absolute/relative path to static /public. Defaults to package public/",
+  })
   .strict().argv as unknown as CliArgs;
 
 /**
@@ -73,11 +79,14 @@ const args = yargs(hideBin(process.argv))
 const main = async (cli: CliArgs) => {
   try {
     process.env.ENV = cli.env;
-    console.log("Running as", process.env.ENV);
-    console.log("Start server....");
-    const httpCtrl = createHttpServer({ port: cli.port });
+    console.log("[vwb] Running as", process.env.ENV);
+    console.log("[vwb] Start server....");
+    const httpCtrl = createHttpServer({
+      port: cli.port,
+      publicDir: cli.publicDir,
+    });
     await httpCtrl.ready;
-    console.log("server ready");
+    console.log("[vwb] server ready");
 
     const wsCtrl = createWsServer({
       app: httpCtrl.app,
