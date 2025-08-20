@@ -106,7 +106,7 @@ module.exports = {
       },
     },
   },
-  resolve: { extensions: [".ts", ".js", ".json", "mjs"] },
+  resolve: { extensions: [".ts", ".js", ".json", ".mjs"] },
   externalsPresets: { node: true },
   plugins: [new AddShebangAndChmodPlugin()],
 };
