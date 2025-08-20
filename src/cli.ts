@@ -5,23 +5,7 @@ import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import { createHttpServer } from "./http-server";
 import { createWsServer } from "./ws-server";
-
-/**
- * CLI arguments definition
- */
-interface CliArgs {
-  url: string;
-  port: number;
-  quality: number;
-  fps: number;
-  headful: boolean;
-  width: number;
-  height: number;
-  token: string;
-  env: "PROD" | "DEV" | "DEBUG" | "TESTING";
-  _: (string | number)[];
-  $0: string;
-}
+import type { CliArgs } from "./types";
 
 /**
  * Parse CLI args with yargs.
@@ -79,8 +63,12 @@ const args = yargs(hideBin(process.argv))
   .strict().argv as unknown as CliArgs;
 
 /**
- * main
- * Orchestrates OS-facing concerns only (signals/env/args).
+ * Entry point for the CLI.
+ *
+ * @example
+ * ```bash
+ * ts-node src/cli.ts --url https://example.com
+ * ```
  */
 const main = async (cli: CliArgs) => {
   try {

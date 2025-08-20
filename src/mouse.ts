@@ -1,47 +1,34 @@
 /* eslint-disable no-console */
 import type { RemoteBrowser } from "./remote-browser";
-
-export interface MousePayload {
-  x: number;
-  y: number;
-  type: "down" | "up" | "move";
-  button?: "left" | "right" | "middle";
-  clickCount?: number;
-  canvasWidth: number;
-  canvasHeight: number;
-}
-export interface WheelPayload {
-  deltaX: number;
-  deltaY: number;
-  x: number;
-  y: number;
-  canvasWidth: number;
-  canvasHeight: number;
-}
+import type {
+  MousePayload,
+  MouseInjectPayload,
+  WheelPayload,
+} from "./types";
 
 /**
- * Inject mouse events using DevTools coordinates computed
- * from either full canvas (1:1) or the drawn image rect (letterboxed).
- * @param rb
- * @param payload
+ * Inject mouse events using DevTools coordinates computed from either the full
+ * canvas (1:1) or a displayed image rectangle.
+ *
+ * @example
+ * ```ts
+ * await injectMousePptr(rb, {
+ *   type: "click",
+ *   x: 10,
+ *   y: 10,
+ *   canvasWidth: 800,
+ *   canvasHeight: 600
+ * });
+ * ```
  */
 export async function injectMousePptr(
   rb: RemoteBrowser,
-  payload: {
-    type: "move" | "down" | "up" | "click" | "dblclick";
-    x: number;
-    y: number;
-    button?: "left" | "right" | "middle";
-    buttonsBits?: number;
-    canvasWidth: number;
-    canvasHeight: number;
-    displayRect?: { x: number; y: number; width: number; height: number };
-  }
+  payload: MouseInjectPayload
 ): Promise<true> {
   try {
     const cdp = rb.getCDP();
 
-    // Optional: ignore clicks that land in letterbox (fuera del draw rect)
+    // Optional: ignore clicks that land in letterbox (outside the draw rect)
     if (
       payload.displayRect &&
       (payload.type === "down" ||
@@ -94,6 +81,21 @@ export async function injectMousePptr(
   }
 }
 
+/**
+ * Inject a mouse wheel event into the remote page.
+ *
+ * @example
+ * ```ts
+ * await injectWheelPptr(rb, {
+ *   deltaX: 0,
+ *   deltaY: -120,
+ *   x: 10,
+ *   y: 10,
+ *   canvasWidth: 800,
+ *   canvasHeight: 600
+ * });
+ * ```
+ */
 export async function injectWheelPptr(
   rb: RemoteBrowser,
   p: WheelPayload

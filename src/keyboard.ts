@@ -1,20 +1,7 @@
 /* eslint-disable no-console */
 import { KeyInput } from "puppeteer";
 import { RemoteBrowser } from "./remote-browser";
-
-/**
- * Wire payload from frontend (pure keydown/keyup).
- */
-export interface KeyPayload {
-  type: "down" | "up";
-  key: string; // e.key (e.g. 'ñ', 'Dead', 'Enter', 'Backspace', etc.)
-  code?: string; // e.code (KeyA, ArrowLeft, NumpadEnter, …)
-  repeat?: boolean;
-  ctrl?: boolean;
-  alt?: boolean;
-  shift?: boolean;
-  meta?: boolean;
-}
+import type { KeyPayload } from "./types";
 
 /** Normalize some browser variants to what Puppeteer expects */
 const KEY_NORMALIZE: Record<string, string> = {
@@ -90,6 +77,14 @@ const idFor = (p: KeyPayload) => p.code || p.key || "";
  * - "Dead" → ignore (no down/up).
  * - Control/function or with modifiers → page.keyboard.down/up(key).
  * - Printable w/o modifiers → sendCharacter() (or CDP Input.insertText) on keydown, suppress keyup.
+ */
+/**
+ * Inject a keyboard event into the remote page via Puppeteer.
+ *
+ * @example
+ * ```ts
+ * await injectKeyPptr(rb, { type: "down", key: "Enter" });
+ * ```
  */
 export async function injectKeyPptr(
   rb: RemoteBrowser,

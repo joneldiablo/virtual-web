@@ -5,7 +5,7 @@ import { injectMousePptr, injectWheelPptr } from "./mouse";
 import { injectKeyPptr } from "./keyboard";
 import { pasteText } from "./clipboard";
 
-/** Find the WS currently using a CID (if any) */
+/** Find the WebSocket currently using a CID (if any). */
 function findWsByCid(
   clients: Map<WebSocket, { cid: number }>,
   cid: number
@@ -14,6 +14,16 @@ function findWsByCid(
   return null;
 }
 
+/**
+ * Multi-client flow where one client is the leader and controls viewport
+ * resizing. All clients receive frames and cursor broadcasts.
+ *
+ * @example
+ * ```ts
+ * const flow = createMultiFlow(ctx);
+ * flow.onSwitchIn();
+ * ```
+ */
 export function createMultiFlow(ctx: FlowContext): Flow {
   let leaderCid: number | null = null;
 
@@ -81,7 +91,7 @@ export function createMultiFlow(ctx: FlowContext): Flow {
     },
 
     onConnect: async (ws, cid) => {
-      // NO hello proactivo: el cliente enviará hello con su clientId y ahí confirmamos.
+      // No proactive hello: the client will send hello with its clientId and we confirm.
       if (!leaderCid) chooseLeader();
       sendMode();
 
@@ -122,11 +132,11 @@ export function createMultiFlow(ctx: FlowContext): Flow {
             const oldCid = rec.cid;
             const want = Number(msg?.payload?.clientId) | 0;
 
-            // (1) Reasignar CID con "takeover" si está en uso por otro WS
+            // (1) Reassign CID with takeover if it's used by another WS
             if (want > 0 && want !== rec.cid) {
               const other = findWsByCid(ctx.clients, want);
               if (other && other !== ws) {
-                // Cerrar el WS anterior que poseía ese cid; cleanup se hará en el handler base on('close')
+                // Close the previous WS that owned that cid; cleanup happens in the base on('close') handler
                 try {
                   ctx.wsSend(other, {
                     type: "error",
@@ -148,7 +158,7 @@ export function createMultiFlow(ctx: FlowContext): Flow {
                 leaderCid = want;
             }
 
-            // (2) Solo el líder puede resizar
+            // (2) Only the leader may resize
             if (
               msg?.payload &&
               typeof msg.payload.canvasWidth === "number" &&
@@ -166,10 +176,10 @@ export function createMultiFlow(ctx: FlowContext): Flow {
               }
             }
 
-            // (3) Confirmar hello con el CID final (el cliente lo guarda en sessionStorage)
+            // (3) Confirm hello with the final CID (client stores it in sessionStorage)
             sendHello(ws, rec.cid);
 
-            // (4) Enviar modo (métricas/leader)
+            // (4) Send mode (metrics/leader)
             sendMode();
             break;
           }
