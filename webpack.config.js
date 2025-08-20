@@ -1,5 +1,6 @@
 const path = require("path");
 const fs = require("fs");
+const nodeExternals = require("webpack-node-externals");
 
 /**
  * AddShebangAndChmodPlugin
@@ -108,5 +109,6 @@ module.exports = {
   },
   resolve: { extensions: [".ts", ".js", ".json", ".mjs"] },
   externalsPresets: { node: true },
+  externals: [nodeExternals()],
   plugins: [new AddShebangAndChmodPlugin()],
 };
