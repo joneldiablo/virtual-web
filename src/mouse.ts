@@ -97,7 +97,7 @@ export async function injectMousePptr(
 export async function injectWheelPptr(
   rb: RemoteBrowser,
   p: WheelPayload
-): Promise<true> {
+): Promise<boolean> {
   try {
     const page = rb.getPage();
     const { x, y } = rb.mapClientToDevtools(
@@ -112,5 +112,6 @@ export async function injectWheelPptr(
   } catch (e) {
     if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
     else console.error(e.message);
+    return false;
   }
 }

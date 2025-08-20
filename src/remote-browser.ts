@@ -202,7 +202,7 @@ export class RemoteBrowser {
    * Resize Puppeteer viewport to match client canvas size (1:1 CSS px).
    * This avoids any letterbox/scaling math on the client.
    */
-  async resizeViewport(width: number, height: number): Promise<true> {
+  async resizeViewport(width: number, height: number): Promise<boolean> {
     try {
       if (!this.page) throw new Error("NO_PAGE");
       // Guardrails
@@ -225,6 +225,7 @@ export class RemoteBrowser {
     } catch (e) {
       if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
       else console.error(e.message);
+      return false;
     }
   }
 
@@ -248,7 +249,7 @@ export class RemoteBrowser {
    * Ensure clipboard permissions for current origin.
    * Uses Puppeteer overridePermissions (web-permissions strings).
    */
-  async ensureClipboardPermissions(): Promise<true> {
+  async ensureClipboardPermissions(): Promise<boolean> {
     try {
       if (this.clipGranted) return true;
       if (!this.browser || !this.page) throw new Error("NO_PAGE");
@@ -272,6 +273,7 @@ export class RemoteBrowser {
     } catch (e) {
       if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
       else console.error(e.message);
+      return false;
     }
   }
 
@@ -279,7 +281,7 @@ export class RemoteBrowser {
    * Clear and set remote clipboard to `text` using navigator.clipboard.
    * Avoids async/await inside page context to prevent __awaiter issues.
    */
-  async setClipboardText(text: string): Promise<true> {
+  async setClipboardText(text: string): Promise<boolean> {
     try {
       if (!this.page) throw new Error("NO_PAGE");
       await this.ensureClipboardPermissions();
@@ -297,6 +299,7 @@ export class RemoteBrowser {
     } catch (e) {
       if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
       else console.error(e.message);
+      return false;
     }
   }
 
