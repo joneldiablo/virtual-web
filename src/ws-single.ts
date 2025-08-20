@@ -5,19 +5,20 @@ import { injectMousePptr, injectWheelPptr } from "./mouse";
 import { injectKeyPptr } from "./keyboard";
 import { pasteText } from "./clipboard";
 
-function isCidInUse(
+/** Find the WS currently using a CID (if any) */
+function findWsByCid(
   clients: Map<WebSocket, { cid: number }>,
-  candidate: number
-) {
-  for (const v of clients.values()) if (v.cid === candidate) return true;
-  return false;
+  cid: number
+): WebSocket | null {
+  for (const [ws, v] of clients.entries()) if (v.cid === cid) return ws;
+  return null;
 }
 
 /**
  * Single-client flow:
  * - The only client can resize viewport freely (1:1).
  * - Sends 'mode' with scaled:false.
- * - Optionally echoes cursor (we keep it simple: no echo; el cursor nativo ya se ve).
+ * - No cursor echo (native cursor is visible).
  */
 export function createSingleFlow(ctx: FlowContext): Flow {
   const sendMode = () => {
@@ -51,15 +52,13 @@ export function createSingleFlow(ctx: FlowContext): Flow {
       sendMode();
     },
 
-    onConnect: async (ws, cid) => {
-      sendHello(ws, cid);
+    onConnect: async (ws /*, cid provisional (ignorado) */) => {
+      // ⚠️ No proactive hello here; wait for client's "hello" to confirm cid
       sendMode();
       try {
         await ctx.ensureRemoteBrowser();
-        // cache frame first
         if (ctx.lastFrameRef.value)
           ctx.wsSend(ws, { type: "frame", payload: ctx.lastFrameRef.value });
-        // then a fresh capture
         try {
           const snap = await ctx.rb.captureFrame();
           ctx.wsSend(ws, { type: "frame", payload: snap });
@@ -78,22 +77,34 @@ export function createSingleFlow(ctx: FlowContext): Flow {
             ctx.wsSend(ws, { type: "pong" });
             break;
           }
+
           case "hello": {
             const rec = ctx.clients.get(ws as any);
-            const prevCid = rec?.cid;
+            if (!rec) break;
 
-            // 1) Reasignar cid si clientId es válido y no está en uso
+            // 1) CID takeover if client asks for a specific clientId
             const want = Number(msg?.payload?.clientId) | 0;
-            if (
-              rec &&
-              want > 0 &&
-              want !== rec.cid &&
-              !isCidInUse(ctx.clients, want)
-            ) {
+            if (want > 0 && want !== rec.cid) {
+              const other = findWsByCid(ctx.clients, want);
+              if (other && other !== ws) {
+                // Close previous holder; cleanup happens in base ws handler
+                try {
+                  ctx.wsSend(other, {
+                    type: "error",
+                    payload: {
+                      code: "CID_REPLACED",
+                      message: "Client reconnected",
+                    },
+                  });
+                } catch {}
+                try {
+                  (other as any).close(4001, "Replaced by reconnect");
+                } catch {}
+              }
               rec.cid = want;
             }
 
-            // 2) Resize libre (single)
+            // 2) Free resize in single flow
             if (
               msg?.payload &&
               typeof msg.payload.canvasWidth === "number" &&
@@ -110,20 +121,14 @@ export function createSingleFlow(ctx: FlowContext): Flow {
               } catch {}
             }
 
-            // 3) Confirmar hello con el cid final
-            ctx.wsSend(ws, {
-              type: "hello",
-              payload: {
-                clients: ctx.clients.size,
-                cid: ctx.clients.get(ws as any)?.cid,
-                leader: null,
-              },
-            });
+            // 3) Confirm final cid so the client stores it (sessionStorage)
+            sendHello(ws, ctx.clients.get(ws as any)!.cid);
 
-            // 4) Notificar modo (por si cambió viewport)
+            // 4) Notify mode (in case metrics changed)
             sendMode();
             break;
           }
+
           case "requestFrame": {
             await ctx.ensureRemoteBrowser();
             if (ctx.lastFrameRef.value)
@@ -137,6 +142,7 @@ export function createSingleFlow(ctx: FlowContext): Flow {
             } catch {}
             break;
           }
+
           case "resize": {
             if (
               msg?.payload &&
@@ -152,11 +158,11 @@ export function createSingleFlow(ctx: FlowContext): Flow {
                 const snap = await ctx.rb.captureFrame();
                 ctx.wsSend(ws, { type: "frame", payload: snap });
               } catch {}
-              // metrics changed → notify
               sendMode();
             }
             break;
           }
+
           case "mouse": {
             await ctx.ensureRemoteBrowser();
             await injectMousePptr(ctx.rb, msg.payload);
@@ -172,6 +178,7 @@ export function createSingleFlow(ctx: FlowContext): Flow {
             await injectKeyPptr(ctx.rb, msg.payload);
             break;
           }
+
           case "clipboard": {
             await ctx.ensureRemoteBrowser();
             if (msg?.payload?.action === "paste") {
@@ -180,6 +187,7 @@ export function createSingleFlow(ctx: FlowContext): Flow {
             }
             break;
           }
+
           default: {
             ctx.wsSend(ws, {
               type: "error",

@@ -5,20 +5,15 @@ import { injectMousePptr, injectWheelPptr } from "./mouse";
 import { injectKeyPptr } from "./keyboard";
 import { pasteText } from "./clipboard";
 
-function isCidInUse(
+/** Find the WS currently using a CID (if any) */
+function findWsByCid(
   clients: Map<WebSocket, { cid: number }>,
-  candidate: number
-) {
-  for (const v of clients.values()) if (v.cid === candidate) return true;
-  return false;
+  cid: number
+): WebSocket | null {
+  for (const [ws, v] of clients.entries()) if (v.cid === cid) return ws;
+  return null;
 }
 
-/**
- * Multi-client flow:
- * - One "leader" (first connected) controls viewport resize.
- * - All clients see each other's cursors via {type:"cursor"} broadcast (incl. sender).
- * - Sends 'mode' with scaled:true, leader:cid, and device metrics.
- */
 export function createMultiFlow(ctx: FlowContext): Flow {
   let leaderCid: number | null = null;
 
@@ -86,14 +81,12 @@ export function createMultiFlow(ctx: FlowContext): Flow {
     },
 
     onConnect: async (ws, cid) => {
-      // pick/confirm leader
+      // NO hello proactivo: el cliente enviará hello con su clientId y ahí confirmamos.
       if (!leaderCid) chooseLeader();
-      sendHello(ws, cid);
       sendMode();
 
       try {
         await ctx.ensureRemoteBrowser();
-        // cached frame then fresh
         if (ctx.lastFrameRef.value)
           ctx.wsSend(ws, { type: "frame", payload: ctx.lastFrameRef.value });
         try {
@@ -103,8 +96,7 @@ export function createMultiFlow(ctx: FlowContext): Flow {
       } catch {}
     },
 
-    onDisconnect: (_ws, _cid) => {
-      // re-elect leader if needed
+    onDisconnect: () => {
       if (
         leaderCid &&
         ![...ctx.clients.values()].some((v) => v.cid === leaderCid)
@@ -113,39 +105,56 @@ export function createMultiFlow(ctx: FlowContext): Flow {
       sendMode();
     },
 
-    onMessage: async (ws, cid, msg) => {
+    onMessage: async (ws, _cidFromBase, msg) => {
       try {
         switch (msg.type) {
           case "ping": {
             ctx.wsSend(ws, { type: "pong" });
             break;
           }
+
           case "hello": {
             await ctx.ensureRemoteBrowser();
 
             const rec = ctx.clients.get(ws as any);
-            const oldCid = rec?.cid;
+            if (!rec) break;
 
-            // 1) Reasignar cid si clientId es válido y libre
+            const oldCid = rec.cid;
             const want = Number(msg?.payload?.clientId) | 0;
-            if (
-              rec &&
-              want > 0 &&
-              want !== rec.cid &&
-              !isCidInUse(ctx.clients, want)
-            ) {
+
+            // (1) Reasignar CID con "takeover" si está en uso por otro WS
+            if (want > 0 && want !== rec.cid) {
+              const other = findWsByCid(ctx.clients, want);
+              if (other && other !== ws) {
+                // Cerrar el WS anterior que poseía ese cid; cleanup se hará en el handler base on('close')
+                try {
+                  ctx.wsSend(other, {
+                    type: "error",
+                    payload: {
+                      code: "CID_REPLACED",
+                      message: "Client reconnected",
+                    },
+                  });
+                } catch {}
+                try {
+                  (other as any).close(4001, "Replaced by reconnect");
+                } catch {}
+              }
               rec.cid = want;
-              // Si el líder era el viejo cid, migrarlo
-              if (leaderCid != null && oldCid === leaderCid) leaderCid = want;
+              if (
+                leaderCid != null &&
+                (oldCid === leaderCid || want === leaderCid)
+              )
+                leaderCid = want;
             }
 
-            // 2) Solo el líder puede resizar
+            // (2) Solo el líder puede resizar
             if (
               msg?.payload &&
               typeof msg.payload.canvasWidth === "number" &&
               typeof msg.payload.canvasHeight === "number"
             ) {
-              if (shouldResize(rec?.cid || 0)) {
+              if (shouldResize(rec.cid)) {
                 await ctx.rb.resizeViewport(
                   msg.payload.canvasWidth | 0,
                   msg.payload.canvasHeight | 0
@@ -157,20 +166,14 @@ export function createMultiFlow(ctx: FlowContext): Flow {
               }
             }
 
-            // 3) Confirmar hello con el cid final y líder actual
-            ctx.wsSend(ws, {
-              type: "hello",
-              payload: {
-                clients: ctx.clients.size,
-                cid: ctx.clients.get(ws as any)?.cid,
-                leader: leaderCid,
-              },
-            });
+            // (3) Confirmar hello con el CID final (el cliente lo guarda en sessionStorage)
+            sendHello(ws, rec.cid);
 
-            // 4) Enviar modo (por métricas/leader)
+            // (4) Enviar modo (métricas/leader)
             sendMode();
             break;
           }
+
           case "requestFrame": {
             await ctx.ensureRemoteBrowser();
             if (ctx.lastFrameRef.value)
@@ -184,14 +187,17 @@ export function createMultiFlow(ctx: FlowContext): Flow {
             } catch {}
             break;
           }
+
           case "resize": {
             await ctx.ensureRemoteBrowser();
+            const rec = ctx.clients.get(ws as any);
+            if (!rec) break;
             if (
               msg?.payload &&
               typeof msg.payload.canvasWidth === "number" &&
               typeof msg.payload.canvasHeight === "number"
             ) {
-              if (shouldResize(cid)) {
+              if (shouldResize(rec.cid)) {
                 await ctx.rb.resizeViewport(
                   msg.payload.canvasWidth | 0,
                   msg.payload.canvasHeight | 0
@@ -205,13 +211,14 @@ export function createMultiFlow(ctx: FlowContext): Flow {
             }
             break;
           }
+
           case "mouse": {
             await ctx.ensureRemoteBrowser();
             await injectMousePptr(ctx.rb, msg.payload);
-            // broadcast cursor for everyone (incl. sender)
-            broadcastCursor(cid, msg.payload);
+            broadcastCursor(ctx.clients.get(ws as any)?.cid!, msg.payload);
             break;
           }
+
           case "wheel": {
             await ctx.ensureRemoteBrowser();
             await injectWheelPptr(ctx.rb, msg.payload);
@@ -222,6 +229,7 @@ export function createMultiFlow(ctx: FlowContext): Flow {
             await injectKeyPptr(ctx.rb, msg.payload);
             break;
           }
+
           case "clipboard": {
             await ctx.ensureRemoteBrowser();
             if (msg?.payload?.action === "paste") {
@@ -230,6 +238,7 @@ export function createMultiFlow(ctx: FlowContext): Flow {
             }
             break;
           }
+
           default: {
             ctx.wsSend(ws, {
               type: "error",
