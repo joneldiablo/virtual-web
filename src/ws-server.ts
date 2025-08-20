@@ -145,7 +145,9 @@ export function createWsServer(
             });
       flow.onSwitchIn();
     } catch (e) {
-      console.error("[vwb] flow switch error:", e);
+      console.error("[vwb] flow switch error:");
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
     }
   };
 
@@ -223,8 +225,9 @@ export function createWsServer(
       } catch {}
       rbStartP = null;
       console.log("[vwb] WS server stopped");
-    } catch (err) {
-      console.error(err);
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
       throw new Error("WS_STOP_FAIL");
     }
   };

@@ -36,6 +36,7 @@ fi
 # builds
 yarn build
 
+node exports.js
 # Update version and capture the new version
 new_version=$(node update-version.js)
 

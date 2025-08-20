@@ -20,20 +20,23 @@ export async function pasteText(
     // This will clear then set clipboard, then send the proper key combo
     await rb.pasteFromClipboard(String(text ?? ""));
     return true;
-  } catch (error: any) {
+  } catch (e: any) {
     try {
-      switch (error?.message) {
+      switch (e?.message) {
         case "RB_CLIP_PERM_FAIL":
         case "RB_CLIP_SET_FAIL":
         case "RB_PASTE_FAIL": {
-          console.error("[clipboard] paste error:", error?.message);
+          console.error("[clipboard] paste error:", e?.message);
           break;
         }
         default: {
-          console.error("[clipboard] unexpected:", error);
+          console.error("[clipboard] unexpected:");
+          if (process.env.ENV !== "PROD" || !(e instanceof Error))
+            console.error(e);
+          else console.error(e.message);
         }
       }
     } catch {}
-    throw error;
+    throw e;
   }
 }

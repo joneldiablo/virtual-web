@@ -135,9 +135,11 @@ export async function injectKeyPptr(
           // If sendCharacter failed for any reason, fallback to CDP too
           try {
             await cdp.send("Input.insertText", { text: key });
-          } catch (err2) {
-            console.error("[keyboard] insert printable failed:", err2);
-            throw err2;
+          } catch (e) {
+            console.error("[keyboard] insert printable failed:");
+            if (process.env.ENV !== "PROD" || !(e instanceof Error))
+              console.error(e);
+            else console.error(e.message);
           }
         }
         if (ident) suppressKeyUp.add(ident);
@@ -155,16 +157,19 @@ export async function injectKeyPptr(
     if (p.type === "down") await page.keyboard.down(key as KeyInput);
     else await page.keyboard.up(key as KeyInput);
     return true;
-  } catch (error) {
-    const msg = (error as Error)?.message || "";
+  } catch (e) {
+    const msg = (e as Error)?.message || "";
     switch (true) {
       case /Unknown key/.test(msg): {
         console.warn("[keyboard] Unknown key swallowed:", msg);
         return true;
       }
       default: {
-        console.error("[keyboard] error:", error);
-        throw new Error("PPTR_KEY_FAIL");
+        console.error("[keyboard] error:");
+        if (process.env.ENV !== "PROD" || !(e instanceof Error))
+          console.error(e);
+        else console.error(e.message);
+        return true;
       }
     }
   }

@@ -1,84 +1,112 @@
-const path = require('path');
-const fs = require('fs');
+const path = require("path");
+const fs = require("fs");
 
 /**
- * Plugin para añadir un shebang al comienzo del bundle generado.
+ * AddShebangAndChmodPlugin
+ * - Strip any existing shebang and prepend "#!/usr/bin/env node\n"
+ * - Only touch assets that match /main.bundle\.js$/
+ * - After emit, chmod +x (0755) on those files on disk
  */
-class AddShebangPlugin {
-  /**
-   * Registro de hooks en el compilador.
-   * @param {Object} compiler - El objeto del compilador de Webpack.
-   */
+class AddShebangAndChmodPlugin {
+  constructor(options = {}) {
+    this.shebang = "#!/usr/bin/env node\n";
+    this.filter = options.filter || /^main\.bundle\.js$/; // <- as requested
+    this.touched = new Set(); // remember files we modified to chmod later
+  }
+
   apply(compiler) {
-    const shebang = '#!/usr/bin/env node\n';
-    compiler.hooks.emit.tapAsync('AddShebangPlugin', (compilation, callback) => {
-      const assetName = compiler.options.output.filename;
-      // Chequea si el asset con el filename existe
-      if (compilation.assets[assetName]) {
-        const asset = compilation.assets[assetName];
-        const originalSource = asset.source();
-        // Añade el shebang si no está presente
-        const updatedSource = originalSource.startsWith(shebang)
-          ? originalSource
-          : shebang + originalSource;
-        // Actualiza el asset con el nuevo contenido
-        compilation.assets[assetName] = {
-          source: () => updatedSource,
-          size: () => updatedSource.length,
-        };
-        console.log(`Shebang has been added to ${assetName}`);
+    const pluginName = "AddShebangAndChmodPlugin";
+
+    // 1) Modify JS sources before writing to disk
+    compiler.hooks.emit.tapAsync(pluginName, (compilation, callback) => {
+      try {
+        const files = Object.keys(compilation.assets || {});
+        for (const file of files) {
+          console.log(file, this.filter.test(file));
+          if (!this.filter.test(file)) continue;
+
+          const asset = compilation.assets[file];
+          const original =
+            typeof asset.source === "function"
+              ? String(asset.source())
+              : String(asset);
+
+          // Strip any existing shebang at the very top
+          const stripped = original.replace(/^#![^\r\n]*(\r?\n)/, "");
+          // Prepend our Node shebang
+          const updated = this.shebang + stripped;
+
+          compilation.assets[file] = {
+            source: () => updated,
+            size: () => Buffer.byteLength(updated, "utf8"),
+          };
+
+          this.touched.add(file);
+          console.log(`[${pluginName}] Shebang forced on ${file}`);
+        }
+        callback();
+      } catch (err) {
+        callback(err);
       }
-      callback();
+    });
+
+    // 2) After assets are written to disk, chmod +x
+    compiler.hooks.afterEmit.tapAsync(pluginName, (compilation, callback) => {
+      const outDir = compiler.options.output && compiler.options.output.path;
+      if (!outDir) return callback();
+
+      const tasks = [];
+      for (const file of this.touched) {
+        const abs = path.join(outDir, file);
+        tasks.push(
+          new Promise((resolve) => {
+            fs.chmod(abs, 0o755, (err) => {
+              if (err) {
+                console.warn(
+                  `[${pluginName}] chmod failed for ${abs}:`,
+                  err.message
+                );
+              } else {
+                console.log(`[${pluginName}] chmod +x applied to ${abs}`);
+              }
+              resolve();
+            });
+          })
+        );
+      }
+
+      Promise.all(tasks)
+        .then(() => callback())
+        .catch(() => callback());
     });
   }
 }
 
 module.exports = {
-  // El archivo de entrada de la aplicación
-  entry: './dist/cjs/index.js',
-  // El entorno de destino
-  target: 'async-node',
-  // Modo del compilador (desarrollo o producción)
-  mode: 'production',
-  // Herramienta para mapear hacia el código original
-  devtool: 'source-map',
+  entry: "./dist/cjs/cli.js",
+  target: "async-node",
+  mode: "production",
+  devtool: "source-map",
   module: {
-    rules: [
-      // Reglas para manejar archivos .node con node-loader
-      {
-        test: /\.node$/,
-        use: 'node-loader',
-      },
-    ],
+    rules: [{ test: /\.node$/, use: "node-loader" }],
   },
   output: {
-    filename: '[name].bundle.js',
-    path: path.resolve(__dirname, 'bin'),
+    filename: "[name].bundle.js",
+    path: path.resolve(__dirname, "bin"),
   },
   optimization: {
     splitChunks: {
-      chunks: 'all', // Indica que debe considerar todos los tipos de chunks (async y non-async)
+      chunks: "all",
       cacheGroups: {
         vendors: {
-          test: /[\\/]node_modules[\\/]/, // Busca los módulos de node_modules
-          name: 'vendors', // Nombre del archivo de salida para las dependencias
-          chunks: 'all',
+          test: /[\\/]node_modules[\\/]/,
+          name: "vendors",
+          chunks: "all",
         },
       },
     },
   },
-  resolve: {
-    extensions: ['.ts', '.js', '.json', 'mjs'],
-  },
-  externals: {
-    mysql: 'commonjs mysql',
-    mysql2: 'commonjs mysql2',
-    oracledb: 'commonjs oracledb',
-    'pg-query-stream': 'commonjs pg-query-stream',
-    pg: 'commonjs pg',
-  },
-  plugins: [
-    // Instancia del plugin para añadir shebang
-    new AddShebangPlugin()
-  ],
+  resolve: { extensions: [".ts", ".js", ".json", "mjs"] },
+  externalsPresets: { node: true },
+  plugins: [new AddShebangAndChmodPlugin()],
 };

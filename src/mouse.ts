@@ -109,8 +109,8 @@ export async function injectWheelPptr(
     await page.mouse.move(x, y); // optional, helps target under cursor
     await page.mouse.wheel({ deltaX: p.deltaX, deltaY: p.deltaY });
     return true;
-  } catch (error) {
-    console.error(error);
-    throw new Error("PPTR_WHEEL_FAIL");
+  } catch (e) {
+    if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+    else console.error(e.message);
   }
 }

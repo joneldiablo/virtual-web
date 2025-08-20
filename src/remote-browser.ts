@@ -68,8 +68,11 @@ export class RemoteBrowser {
           await this.cdp!.send("Page.screencastFrameAck", {
             sessionId: evt.sessionId,
           });
-        } catch (err) {
-          console.error("[rb] frame error:", err);
+        } catch (e) {
+          console.error("[rb] frame error:");
+          if (process.env.ENV !== "PROD" || !(e instanceof Error))
+            console.error(e);
+          else console.error(e.message);
         }
       });
 
@@ -126,8 +129,9 @@ export class RemoteBrowser {
 
       this.running = true;
       return true;
-    } catch (error) {
-      console.error(error);
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
       throw new Error("RB_START_FAIL");
     }
   }
@@ -149,20 +153,22 @@ export class RemoteBrowser {
       this.browser = null;
       this.page = null;
       return true;
-    } catch (error) {
-      console.error(error);
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
       throw new Error("RB_STOP_FAIL");
     }
   }
 
-  async goto(url: string): Promise<true> {
+  async goto(url: string): Promise<boolean> {
     try {
       if (!this.page) throw new Error("NO_PAGE");
       await this.page.goto(url, { waitUntil: "domcontentloaded" });
       return true;
-    } catch (error) {
-      console.error(error);
-      throw new Error("RB_GOTO_FAIL");
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
+      return false;
     }
   }
 
@@ -216,9 +222,9 @@ export class RemoteBrowser {
       this.deviceWidth = w;
       this.deviceHeight = h;
       return true;
-    } catch (error) {
-      console.error(error);
-      throw new Error("RB_RESIZE_FAIL");
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
     }
   }
 
@@ -231,8 +237,9 @@ export class RemoteBrowser {
         fromSurface: true,
       });
       return data as string; // base64 (no prefix)
-    } catch (error) {
-      console.error(error);
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
       throw new Error("RB_CAPTURE_FAIL");
     }
   }
@@ -262,9 +269,9 @@ export class RemoteBrowser {
       }
       this.clipGranted = true;
       return true;
-    } catch (error) {
-      console.error(error);
-      throw new Error("RB_CLIP_PERM_FAIL");
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
     }
   }
 
@@ -287,9 +294,9 @@ export class RemoteBrowser {
       }, text);
 
       return true;
-    } catch (error) {
-      console.error(error);
-      throw new Error("RB_CLIP_SET_FAIL");
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
     }
   }
 
@@ -318,13 +325,16 @@ export class RemoteBrowser {
         try {
           await this.getCDP().send("Input.insertText", { text });
           return true;
-        } catch (insertErr) {
-          console.error(insertErr);
+        } catch (e) {
+          if (process.env.ENV !== "PROD" || !(e instanceof Error))
+            console.error(e);
+          else console.error(e.message);
           throw new Error("RB_PASTE_FAIL");
         }
       }
-    } catch (error) {
-      console.error(error);
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
       throw new Error("RB_PASTE_FAIL");
     }
   }

@@ -51,8 +51,9 @@ export function createHttpServer(opts: { port: number }): HttpServerController {
     try {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       console.log("[vwb] HTTP server closed");
-    } catch (err) {
-      console.error(err);
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
     }
   };
 
