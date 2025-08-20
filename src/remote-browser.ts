@@ -1,19 +1,26 @@
 /* eslint-disable no-console */
 import puppeteer, { Browser, Page } from "puppeteer";
-
-export interface RemoteBrowserStartOptions {
-  url: string;
-  width: number;
-  height: number;
-  headful: boolean;
-  quality: number;
-  fps: number;
-  onFrame: (base64: string) => void;
-  onClipboard?: (ev: { action: "copy" | "cut"; text: string }) => void;
-}
+import type { RemoteBrowserStartOptions } from "./types";
 
 /**
- * Minimal RemoteBrowser: starts/stops Chromium, streams frames and exposes CDP + mapper.
+ * Minimal wrapper around Puppeteer that launches Chromium, streams frames and
+ * exposes helper methods for input injection and coordinate mapping.
+ *
+ * @example
+ * ```ts
+ * const rb = new RemoteBrowser();
+ * await rb.start({
+ *   url: "https://example.com",
+ *   width: 1280,
+ *   height: 720,
+ *   headful: false,
+ *   quality: 60,
+ *   fps: 30,
+ *   onFrame: (img) => console.log(img.slice(0, 20)),
+ * });
+ * // ...
+ * await rb.stop();
+ * ```
  */
 export class RemoteBrowser {
   private browser: Browser | null = null;
@@ -324,7 +331,7 @@ export class RemoteBrowser {
         }
         return true;
       } catch (permOrWriteErr) {
-        // Fallback: direct insert (won't fire paste handlers but evita concatenación)
+        // Fallback: direct insert (won't fire paste handlers but avoids concatenation)
         try {
           await this.getCDP().send("Input.insertText", { text });
           return true;
@@ -341,8 +348,6 @@ export class RemoteBrowser {
       throw new Error("RB_PASTE_FAIL");
     }
   }
-
-  // Dentro de class RemoteBrowser
 
   /**
    * Map from client canvas coordinates + drawn image rectangle

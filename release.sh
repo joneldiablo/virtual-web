@@ -1,11 +1,38 @@
 #!/bin/bash
-
+# Variable initialization
+OTP=""
 
 # Usage function
 usage() {
-  echo "Usage: $0"
+  echo "Usage: $0 [--otp <otp>]"
   exit 1
 }
+
+# Argument parsing
+while getopts ":-:" opt; do
+  case ${opt} in
+    -)
+      case "${OPTARG}" in
+        otp)
+          OTP="${!OPTIND}"
+          OPTIND=$(($OPTIND + 1))
+          ;;
+        *)
+          echo "Invalid option: --${OPTARG}" >&2
+          usage
+          ;;
+      esac
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      usage
+      ;;
+    :)
+      echo "Option -$OPTARG requires an argument." >&2
+      usage
+      ;;
+  esac
+done
 
 ##------ Check for uncommitted changes
 if git diff-index --quiet HEAD --; then
@@ -36,6 +63,12 @@ fi
 # builds
 yarn build
 
+# Check if build was successful
+if [ $? -ne 0 ]; then
+  echo "Build failed. Stopping the script."
+  exit 1
+fi
+
 node exports.js
 # Update version and capture the new version
 new_version=$(node update-version.js)
@@ -47,9 +80,15 @@ git push origin --all
 git tag -a "$new_version" -m "$new_version"
 git push origin "$new_version"
 
+# Publish on npm
+if [ -n "$OTP" ]; then
+  npm publish --otp "$OTP"
+else
+  npm publish
+fi
 
 # Switch back to the previous branch
 git checkout -
 
-# shows new version
+# Show new version
 echo "$new_version"

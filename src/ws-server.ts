@@ -17,6 +17,18 @@ import type {
   WsServerController,
 } from "./types";
 
+/**
+ * Create a WebSocket server that proxies input to a {@link RemoteBrowser} and
+ * broadcasts frames to connected clients. The server automatically switches
+ * between single-client and multi-client flows.
+ *
+ * @example
+ * ```ts
+ * const ctrl = createWsServer({ app, server, url, width, height, headful:false, quality:60, fps:30 });
+ * // later
+ * await ctrl.stop();
+ * ```
+ */
 export function createWsServer(
   opts: CreateWsServerOptions
 ): WsServerController {

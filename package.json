@@ -2,6 +2,9 @@
   "name": "virtual-web-browser",
   "version": "1.0.2",
   "description": "Virtual Web Browser",
+  "engines": {
+    "node": ">=18"
+  },
   "main": "dist/cjs/index.js",
   "bin": {
     "vwb": "./bin/main.bundle.js"
@@ -70,6 +73,16 @@
       "source": "./src/js/ws-single.ts"
     }
   },
+  "files": [
+    "dist/**",
+    "bin/**",
+    "public/**",
+    "src/**",
+    "tsconfig.json",
+    "tsconfig.esm.json",
+    "README.md",
+    "LICENSE"
+  ],
   "directories": {
     "src": "src"
   },
