@@ -5,7 +5,7 @@ import { injectMousePptr, injectWheelPptr } from "./mouse";
 import { injectKeyPptr } from "./keyboard";
 import { pasteText } from "./clipboard";
 
-/** Find the WS currently using a CID (if any) */
+/** Find the WebSocket currently using a CID (if any). */
 function findWsByCid(
   clients: Map<WebSocket, { cid: number }>,
   cid: number
@@ -15,10 +15,14 @@ function findWsByCid(
 }
 
 /**
- * Single-client flow:
- * - The only client can resize viewport freely (1:1).
- * - Sends 'mode' with scaled:false.
- * - No cursor echo (native cursor is visible).
+ * Flow used when only a single client is connected. The client can freely
+ * resize the viewport and receives frames without cursor echo.
+ *
+ * @example
+ * ```ts
+ * const flow = createSingleFlow(ctx);
+ * flow.onSwitchIn();
+ * ```
  */
 export function createSingleFlow(ctx: FlowContext): Flow {
   const sendMode = () => {
@@ -52,8 +56,8 @@ export function createSingleFlow(ctx: FlowContext): Flow {
       sendMode();
     },
 
-    onConnect: async (ws /*, cid provisional (ignorado) */) => {
-      // ⚠️ No proactive hello here; wait for client's "hello" to confirm cid
+    onConnect: async (ws, _cid) => {
+      // No proactive hello here; wait for the client's "hello" to confirm cid
       sendMode();
       try {
         await ctx.ensureRemoteBrowser();

@@ -3,20 +3,19 @@ import path from "node:path";
 import fs from "node:fs";
 import http from "http";
 import express, { Application } from "express";
+import type { HttpServerController } from "./types";
 
 /**
- * Controller returned by createHttpServer
- */
-export interface HttpServerController {
-  app: Application;
-  server: http.Server;
-  ready: Promise<true>;
-  stop: (code?: number) => Promise<void>;
-}
-
-/**
- * Create and start a static HTTP server for /public.
- * No globals, no external resolve/reject.
+ * Create and start a static HTTP server that serves files from the `public`
+ * directory and exposes a simple health endpoint.
+ *
+ * @example
+ * ```ts
+ * const ctrl = createHttpServer({ port: 8080 });
+ * await ctrl.ready; // server is listening
+ * // ... later
+ * await ctrl.stop();
+ * ```
  */
 export function createHttpServer(opts: { port: number }): HttpServerController {
   // Validate public dir

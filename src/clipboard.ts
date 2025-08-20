@@ -2,15 +2,29 @@
 import { RemoteBrowser } from "./remote-browser";
 
 /**
- * Paste plain text using real clipboard paste:
- * - Grants permissions
- * - Clears clipboard
- * - Writes text
- * - Sends Ctrl/Cmd+V so sites that listen to 'paste' work as expected
- * Falls back to Input.insertText on failure.
- * @param {RemoteBrowser} rb
- * @param {string} text
- * @returns {Promise<true>}
+ * Paste plain text using the remote clipboard and a real paste keystroke.
+ *
+ * The function grants clipboard permissions, clears existing data, writes the
+ * provided text, and finally triggers the platform-specific paste shortcut. If
+ * any of these steps fails, it falls back to `Input.insertText` via the Chrome
+ * DevTools Protocol.
+ *
+ * @example
+ * ```ts
+ * import { pasteText, RemoteBrowser } from "virtual-web-browser";
+ *
+ * const rb = new RemoteBrowser();
+ * await rb.start({
+ *   url: "https://example.com",
+ *   width: 800,
+ *   height: 600,
+ *   headful: false,
+ *   quality: 60,
+ *   fps: 30,
+ *   onFrame: () => {}
+ * });
+ * await pasteText(rb, "Hello world");
+ * ```
  */
 export async function pasteText(
   rb: RemoteBrowser,
