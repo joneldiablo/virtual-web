@@ -35,12 +35,22 @@
         background: #3f1212;
         color: #f3aeae;
       }
+
+      /* New: wrapper that anchors the overlay exactly over the canvas area */
+      #stage {
+        position: relative; /* anchor for overlay */
+        width: 100vw;
+        height: calc(100vh - 48px); /* below the topbar */
+        overflow: hidden; /* safety */
+        background: #111;
+      }
+
       #screen {
         display: block;
-        width: 100vw;
-        height: calc(100vh - 48px);
-        object-fit: contain;
-        background: #111;
+        width: 100%;
+        height: 100%;
+        object-fit: contain; /* letterbox preserved */
+        background: transparent; /* stage carries the bg */
       }
     </style>
   </head>
@@ -50,12 +60,17 @@
       <span>WS:</span> <span id="ws-status" class="badge">checking…</span>
       <span>Clients:</span> <span id="ws-clients" class="badge">-</span>
     </div>
-    <canvas id="screen"></canvas>
+
+    <!-- New wrapper: cursors overlay will attach here -->
+    <div id="stage">
+      <canvas id="screen"></canvas>
+    </div>
 
     <script type="module">
       // --- UI imports ---
       import { attachFrameRenderer } from "./viewer.js";
       import { attachClient } from "./client.js";
+      import { CursorOverlay } from "./cursors.js";
 
       // --- DOM refs ---
       const httpBadge = document.getElementById("http-status");
@@ -64,7 +79,7 @@
       const canvas = document.getElementById("screen");
 
       // --- helpers ---
-      const httpBase = location.origin; // http://host:port
+      const httpBase = location.origin;
       const setBadge = (el, state, text) => {
         el.classList.remove("ok", "fail");
         if (state) el.classList.add(state);
@@ -103,27 +118,26 @@
         await Promise.all([checkHttpHealth(), checkWsHealth()]);
       }
 
-      // --- viewer ---
+      // --- viewer (handles draw rect for letterbox) ---
       const { render, fit, getLayout } = attachFrameRenderer(canvas);
       addEventListener("resize", fit, { passive: true });
       fit();
+
+      // --- cursor overlay anchored to #stage via parentElement ---
+      const cursors = new CursorOverlay({ canvas, getLayout });
 
       // --- client (inputs + frames) ---
       const ctrl = attachClient({
         canvas,
         getLayout,
-        // Marca estado WS vía hooks (si tu client.js ya soporta estos; abajo dejo patch)
         onOpen: () => setBadge(wsBadge, "ok", "OPEN"),
         onClose: () => setBadge(wsBadge, "fail", "CLOSED"),
         onError: () => setBadge(wsBadge, "fail", "ERROR"),
         onMessage: async (data) => {
-          // Si llega JSON...
           try {
             const msg = typeof data === "string" ? JSON.parse(data) : undefined;
-            if (msg && msg.type === "frame" && msg.payload) {
-              await render(msg.payload);
-              return;
-            }
+
+            // hello → update client count
             if (
               msg &&
               msg.type === "hello" &&
@@ -133,21 +147,42 @@
               wsClients.textContent = String(msg.payload.clients);
               return;
             }
+
+            // mode → device metrics for overlay mapping
+            if (msg && msg.type === "mode" && msg.payload) {
+              const { deviceWidth, deviceHeight } = msg.payload;
+              cursors.setDeviceMetrics(deviceWidth, deviceHeight);
+              return;
+            }
+
+            // cursor → draw everyone (including sender)
+            if (msg && msg.type === "cursor" && msg.payload) {
+              cursors.update(msg.payload);
+              return;
+            }
+
+            // frame → render JPEG base64
+            if (msg && msg.type === "frame" && msg.payload) {
+              await render(msg.payload);
+              return;
+            }
+
+            // error → badge feedback
             if (msg && msg.type === "error") {
               setBadge(wsBadge, "fail", "ERROR");
               return;
             }
           } catch {
-            // No era JSON → asume base64 JPEG crudo
+            // Not JSON → raw base64 JPEG
             await render(data);
           }
         },
       });
 
-      // Ping de vida (debug)
+      // Small ping (debug)
       setTimeout(() => ctrl.send({ type: "ping" }), 1500);
 
-      // Arranca el polling
+      // Start health polling
       pollHealth();
       setInterval(pollHealth, 4000);
     </script>

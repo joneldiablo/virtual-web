@@ -328,4 +328,52 @@ export class RemoteBrowser {
       throw new Error("RB_PASTE_FAIL");
     }
   }
+
+  // Dentro de class RemoteBrowser
+
+  /**
+   * Map from client canvas coordinates + drawn image rectangle
+   * (letterboxed inside the canvas) → DevTools CSS coordinates.
+   * Clamps to [0..deviceWidth-1], [0..deviceHeight-1].
+   * @param {number} x
+   * @param {number} y
+   * @param {{x:number,y:number,width:number,height:number}} rect - draw rect inside canvas (from client)
+   */
+  mapFromDisplayRect(
+    x: number,
+    y: number,
+    rect: { x: number; y: number; width: number; height: number }
+  ): { x: number; y: number } {
+    try {
+      const rw = Math.max(1, rect?.width | 0);
+      const rh = Math.max(1, rect?.height | 0);
+      const rx = (x - (rect?.x || 0)) / rw;
+      const ry = (y - (rect?.y || 0)) / rh;
+      const nx = Math.max(0, Math.min(1, rx));
+      const ny = Math.max(0, Math.min(1, ry));
+      let mx = Math.round(nx * (this.deviceWidth - 1));
+      let my = Math.round(ny * (this.deviceHeight - 1));
+      if (mx < 0) mx = 0;
+      if (my < 0) my = 0;
+      if (mx > this.deviceWidth - 1) mx = this.deviceWidth - 1;
+      if (my > this.deviceHeight - 1) my = this.deviceHeight - 1;
+      return { x: mx, y: my };
+    } catch {
+      // Fallback: default scaling (shouldn't happen)
+      return this.mapClientToDevtools(
+        x,
+        y,
+        rect?.width || 1,
+        rect?.height || 1
+      );
+    }
+  }
+
+  getMetrics() {
+    return {
+      deviceWidth: this.deviceWidth,
+      deviceHeight: this.deviceHeight,
+      pageScale: this.pageScale,
+    };
+  }
 }

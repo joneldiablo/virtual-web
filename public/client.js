@@ -199,6 +199,23 @@ export function attachClient(options) {
   /** Normalize button number → "left" | "middle" | "right" */
   const normBtn = (b) => (b === 2 ? "right" : b === 1 ? "middle" : "left");
 
+  const CID_KEY = "vwb_cid";
+  function getStoredCid() {
+    try {
+      const v = sessionStorage.getItem(CID_KEY);
+      const n = v ? parseInt(v, 10) : 0;
+      return Number.isFinite(n) && n > 0 ? n : null;
+    } catch {
+      return null;
+    }
+  }
+  function setStoredCid(cid) {
+    try {
+      if (Number.isFinite(cid) && cid > 0)
+        sessionStorage.setItem(CID_KEY, String(cid));
+    } catch {}
+  }
+
   /** Connect WS with auto-retry and initial hello/requestFrame */
   const connect = () => {
     try {
@@ -206,23 +223,41 @@ export function attachClient(options) {
 
       ws.onopen = () => {
         options.onOpen && options.onOpen();
+
+        // 1) enviar hello con tamaño de canvas + clientId si existe
         const r = canvas.getBoundingClientRect();
+        const clientId = getStoredCid();
         safeSend({
           type: "hello",
           payload: {
             canvasWidth: r.width | 0,
             canvasHeight: r.height | 0,
+            ...(clientId ? { clientId } : {}),
             ...(token ? { token } : {}),
           },
         });
+
+        // 2) pedir frame inicial
         safeSend({ type: "requestFrame" });
       };
 
       ws.onmessage = async (event) => {
-        // 1) Clipboard messages (remote → host)
         try {
           const msg =
             typeof event.data === "string" ? JSON.parse(event.data) : undefined;
+
+          // Guardar cid confirmado por el server
+          if (
+            msg &&
+            msg.type === "hello" &&
+            msg.payload &&
+            typeof msg.payload.cid === "number"
+          ) {
+            setStoredCid(msg.payload.cid);
+            options.onHello && options.onHello(msg.payload); // opcional
+            return;
+          }
+
           if (msg && msg.type === "clipboard" && msg.payload) {
             const { action, text } = msg.payload || {};
             if (

@@ -8,47 +8,45 @@ import expressWs, {
 import type { WebSocket } from "ws";
 
 import { RemoteBrowser } from "./remote-browser";
-import { injectMousePptr, injectWheelPptr } from "./mouse";
-import { injectKeyPptr } from "./keyboard";
-import { pasteText } from "./clipboard";
-
-export interface WsServerController {
-  stop: () => Promise<void>;
-}
-export interface CreateWsServerOptions {
-  app: Application;
-  server: Server;
-  token?: string;
-  url: string;
-  width: number;
-  height: number;
-  headful: boolean;
-  quality: number;
-  fps: number;
-}
+import { createSingleFlow } from "./ws-single";
+import { createMultiFlow } from "./ws-multi";
+import type {
+  CreateWsServerOptions,
+  Flow,
+  FlowContext,
+  WsServerController,
+} from "./types";
 
 export function createWsServer(
   opts: CreateWsServerOptions
 ): WsServerController {
   const { app, server, token = "" } = opts;
   const { app: wsApp } = expressWs(app as WsApplication, server);
-  const clients = new Set<WebSocket>();
 
+  // --- clients registry ---
+  const clients = new Map<WebSocket, { cid: number }>();
+  let nextCid = 1;
+
+  // --- RB + frame cache ---
   const rb = new RemoteBrowser();
   let rbStartP: Promise<true> | null = null;
+  const lastFrameRef = { value: null as string | null };
 
-  // Cache last screencast frame for instant paint on new clients
-  let lastFrameBase64: string | null = null;
-
+  // --- helpers ---
+  const wsSend = (ws: WebSocket, msg: any) => {
+    try {
+      /* @ts-ignore */ if (ws.readyState === 1)
+        ws.send(typeof msg === "string" ? msg : JSON.stringify(msg));
+    } catch {}
+  };
   const broadcast = (msg: any) => {
-    const text = typeof msg === "string" ? msg : JSON.stringify(msg);
-    for (const c of clients) {
+    const s = typeof msg === "string" ? msg : JSON.stringify(msg);
+    for (const ws of clients.keys()) {
       try {
-        if (c.readyState === 1) c.send(text);
+        /* @ts-ignore */ if (ws.readyState === 1) ws.send(s);
       } catch {}
     }
   };
-
   const ensureRemoteBrowser = (): Promise<true> => {
     if (rbStartP) return rbStartP;
     rbStartP = rb
@@ -60,16 +58,14 @@ export function createWsServer(
         quality: opts.quality,
         fps: opts.fps,
         onFrame: (base64) => {
-          lastFrameBase64 = base64;
+          lastFrameRef.value = base64;
           broadcast({ type: "frame", payload: base64 });
         },
-        onClipboard: (ev: any) => {
-          // Remote → Client: share copied text
+        onClipboard: (ev) =>
           broadcast({
             type: "clipboard",
             payload: { action: ev.action, text: ev.text || "" },
-          });
-        },
+          }),
       })
       .then((r) => {
         console.log("[vwb] RemoteBrowser started");
@@ -81,7 +77,15 @@ export function createWsServer(
       });
     return rbStartP;
   };
+  const getMetrics = () => {
+    try {
+      const m = (rb as any).getMetrics?.();
+      if (m && m.deviceWidth && m.deviceHeight) return m;
+    } catch {}
+    return { deviceWidth: opts.width, deviceHeight: opts.height };
+  };
 
+  // --- auth ---
   const isAuthorized = (reqUrl?: string) => {
     try {
       if (!token) return true;
@@ -92,6 +96,7 @@ export function createWsServer(
     }
   };
 
+  // --- health ---
   app.get("/ws/health", (_req, res) => {
     try {
       res.json({ ok: true, clients: clients.size });
@@ -100,210 +105,116 @@ export function createWsServer(
     }
   });
 
+  // --- Flow switcher ---
+  let flow: Flow = createSingleFlow({
+    opts,
+    rb,
+    ensureRemoteBrowser,
+    clients,
+    wsSend,
+    broadcast,
+    lastFrameRef,
+    getMetrics,
+  });
+
+  const recomputeFlow = () => {
+    try {
+      const want = clients.size > 1 ? "multi" : "single";
+      if (flow.name === want) return;
+      flow =
+        want === "multi"
+          ? createMultiFlow({
+              opts,
+              rb,
+              ensureRemoteBrowser,
+              clients,
+              wsSend,
+              broadcast,
+              lastFrameRef,
+              getMetrics,
+            })
+          : createSingleFlow({
+              opts,
+              rb,
+              ensureRemoteBrowser,
+              clients,
+              wsSend,
+              broadcast,
+              lastFrameRef,
+              getMetrics,
+            });
+      flow.onSwitchIn();
+    } catch (e) {
+      console.error("[vwb] flow switch error:", e);
+    }
+  };
+
+  // --- WS handler (delegates to flow) ---
   const wsHandler: WebsocketRequestHandler = (ws, req) => {
     if (!isAuthorized(req.url)) {
+      wsSend(ws as any, {
+        type: "error",
+        payload: { code: "AUTH_FAIL", message: "Unauthorized" },
+      });
       try {
-        ws.send(
-          JSON.stringify({
-            type: "error",
-            payload: { code: "AUTH_FAIL", message: "Unauthorized" },
-          })
-        );
-      } catch {}
-      try {
-        ws.close(1008, "Unauthorized");
+        /* @ts-ignore */ ws.close(1008, "Unauthorized");
       } catch {}
       return;
     }
-    clients.add(ws as unknown as WebSocket);
+
+    const cid = nextCid++;
+    clients.set(ws as unknown as WebSocket, { cid });
+    recomputeFlow();
+
+    // delegate
     try {
-      ws.send(
-        JSON.stringify({ type: "hello", payload: { clients: clients.size } })
-      );
+      flow.onConnect(ws as any, cid);
     } catch {}
 
-    ensureRemoteBrowser()
-      .then(async () => {
-        // 1) send cached frame immediately if we have it
-        if (lastFrameBase64) {
-          try {
-            ws.send(
-              JSON.stringify({ type: "frame", payload: lastFrameBase64 })
-            );
-          } catch {}
-        }
-        // 2) send a fresh capture for this client (no bloqueo del broadcast)
-        try {
-          const snap = await rb.captureFrame();
-          try {
-            ws.send(JSON.stringify({ type: "frame", payload: snap }));
-          } catch {}
-        } catch {}
-      })
-      .catch((err) => {
-        console.error("[vwb] RB start error:", err);
-        try {
-          ws.send(
-            JSON.stringify({
-              type: "error",
-              payload: {
-                code: "RB_START_FAIL",
-                message: "Failed to start browser",
-              },
-            })
-          );
-        } catch {}
-      });
-
+    // route messages
     ws.on("message", async (raw) => {
       try {
         const s = typeof raw === "string" ? raw : raw.toString();
         const msg = JSON.parse(s);
         if (!msg || typeof msg !== "object" || typeof msg.type !== "string")
           return;
-
-        switch (msg.type) {
-          case "ping": {
-            try {
-              ws.send(JSON.stringify({ type: "pong" }));
-            } catch {}
-            break;
-          }
-          case "hello": {
-            // If hello carries canvas size, match viewport (como ya lo tienes)
-            if (
-              msg.payload &&
-              typeof msg.payload.canvasWidth === "number" &&
-              typeof msg.payload.canvasHeight === "number"
-            ) {
-              await ensureRemoteBrowser();
-              await rb.resizeViewport(
-                msg.payload.canvasWidth | 0,
-                msg.payload.canvasHeight | 0
-              );
-              // después del resize, captura frame fresco
-              try {
-                const snap = await rb.captureFrame();
-                try {
-                  ws.send(JSON.stringify({ type: "frame", payload: snap }));
-                } catch {}
-              } catch {}
-            }
-            break;
-          }
-          case "requestFrame": {
-            await ensureRemoteBrowser();
-            // try cached first
-            if (lastFrameBase64) {
-              try {
-                ws.send(
-                  JSON.stringify({ type: "frame", payload: lastFrameBase64 })
-                );
-              } catch {}
-            }
-            // then attempt a fresh capture
-            try {
-              const snap = await rb.captureFrame();
-              try {
-                ws.send(JSON.stringify({ type: "frame", payload: snap }));
-              } catch {}
-            } catch {}
-            break;
-          }
-          case "resize": {
-            if (
-              msg.payload &&
-              typeof msg.payload.canvasWidth === "number" &&
-              typeof msg.payload.canvasHeight === "number"
-            ) {
-              await ensureRemoteBrowser();
-              await rb.resizeViewport(
-                msg.payload.canvasWidth | 0,
-                msg.payload.canvasHeight | 0
-              );
-              // captura post-resize para que pinte al instante
-              try {
-                const snap = await rb.captureFrame();
-                try {
-                  ws.send(JSON.stringify({ type: "frame", payload: snap }));
-                } catch {}
-              } catch {}
-            }
-            break;
-          }
-          case "mouse": {
-            await ensureRemoteBrowser();
-            await injectMousePptr(rb, msg.payload);
-            break;
-          }
-          case "wheel": {
-            await ensureRemoteBrowser();
-            await injectWheelPptr(rb, msg.payload);
-            break;
-          }
-          case "key": {
-            await ensureRemoteBrowser();
-            await injectKeyPptr(rb, msg.payload);
-            break;
-          }
-          case "clipboard": {
-            await ensureRemoteBrowser();
-            const action = msg?.payload?.action;
-            if (action === "paste") {
-              const text = String(msg?.payload?.text ?? "");
-              if (text) await pasteText(rb, text);
-              // opcional: ack
-              // try { ws.send(JSON.stringify({ type: "clipboard", payload: { action: "pasted", ok: true } })); } catch {}
-            } else if (action === "request") {
-              // No standard way to read Chromium clipboard from CDP; omit for now.
-              // You could keep last 'copy/cut' and return it if necesitas:
-              // try { ws.send(JSON.stringify({ type: "clipboard", payload: { action: "copy", text: lastCopied } })); } catch {}
-            }
-            break;
-          }
-
-          default: {
-            try {
-              ws.send(
-                JSON.stringify({
-                  type: "error",
-                  payload: { code: "UNSUPPORTED", message: "Unknown type" },
-                })
-              );
-            } catch {}
-          }
-        }
-      } catch (err) {
-        try {
-          ws.send(
-            JSON.stringify({
-              type: "error",
-              payload: { code: "BAD_MSG", message: "Invalid message" },
-            })
-          );
-        } catch {}
+        await flow.onMessage(ws as any, cid, msg);
+      } catch {
+        wsSend(ws as any, {
+          type: "error",
+          payload: { code: "BAD_MSG", message: "Invalid message" },
+        });
       }
     });
 
     ws.on("close", () => {
       clients.delete(ws as unknown as WebSocket);
+      recomputeFlow();
+      try {
+        flow.onDisconnect(ws as any, cid);
+      } catch {}
     });
+
     ws.on("error", () => {
       clients.delete(ws as unknown as WebSocket);
       try {
-        ws.close();
+        /* @ts-ignore */ ws.close();
+      } catch {}
+      recomputeFlow();
+      try {
+        flow.onDisconnect(ws as any, cid);
       } catch {}
     });
   };
 
   (wsApp as unknown as WsApplication).ws("/ws", wsHandler);
+  console.log("[vwb] WS mounted at /ws (health at /ws/health)");
 
-  const ready = Promise.resolve(true);
   const stop = async () => {
     try {
-      for (const c of clients) {
+      for (const ws of clients.keys()) {
         try {
-          c.close();
+          /* @ts-ignore */ ws.close();
         } catch {}
       }
       clients.clear();
@@ -318,6 +229,5 @@ export function createWsServer(
     }
   };
 
-  console.log("[vwb] WS mounted at /ws (health at /ws/health)");
   return { stop };
 }

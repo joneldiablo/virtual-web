@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-import { RemoteBrowser } from "./remote-browser";
+import type { RemoteBrowser } from "./remote-browser";
 
 export interface MousePayload {
   x: number;
@@ -19,42 +19,78 @@ export interface WheelPayload {
   canvasHeight: number;
 }
 
-/** Mouse via Puppeteer page.mouse.* */
+/**
+ * Inject mouse events using DevTools coordinates computed
+ * from either full canvas (1:1) or the drawn image rect (letterboxed).
+ * @param rb
+ * @param payload
+ */
 export async function injectMousePptr(
   rb: RemoteBrowser,
-  p: MousePayload
+  payload: {
+    type: "move" | "down" | "up" | "click" | "dblclick";
+    x: number;
+    y: number;
+    button?: "left" | "right" | "middle";
+    buttonsBits?: number;
+    canvasWidth: number;
+    canvasHeight: number;
+    displayRect?: { x: number; y: number; width: number; height: number };
+  }
 ): Promise<true> {
   try {
-    const page = rb.getPage();
-    const { x, y } = rb.mapClientToDevtools(
-      p.x,
-      p.y,
-      p.canvasWidth,
-      p.canvasHeight
-    );
+    const cdp = rb.getCDP();
 
-    // move always (keeps cursor logical position in sync)
-    await page.mouse.move(x, y);
-
-    if (p.type === "move") return true;
-
-    const button = p.button ?? "left";
-    if (p.type === "down") {
-      await page.mouse.down({
-        button,
-        clickCount: p.clickCount && p.clickCount > 1 ? p.clickCount : 1,
-      });
-      return true;
+    // Optional: ignore clicks that land in letterbox (fuera del draw rect)
+    if (
+      payload.displayRect &&
+      (payload.type === "down" ||
+        payload.type === "up" ||
+        payload.type === "click" ||
+        payload.type === "dblclick")
+    ) {
+      const r = payload.displayRect;
+      const inX = payload.x >= r.x && payload.x <= r.x + r.width;
+      const inY = payload.y >= r.y && payload.y <= r.y + r.height;
+      if (!inX || !inY) return true; // ignore clicks outside the video area
     }
-    // up
-    await page.mouse.up({
+
+    // Map coords
+    const dev =
+      payload.displayRect &&
+      payload.displayRect.width &&
+      payload.displayRect.height
+        ? rb.mapFromDisplayRect(payload.x, payload.y, payload.displayRect)
+        : rb.mapClientToDevtools(
+            payload.x,
+            payload.y,
+            payload.canvasWidth,
+            payload.canvasHeight
+          );
+
+    const typeMap: any = {
+      move: "mouseMoved",
+      down: "mousePressed",
+      up: "mouseReleased",
+    };
+    const cdptype = typeMap[payload.type] || typeMap.move;
+
+    const button = payload.button || "left";
+    const buttons = payload.buttonsBits ?? 0;
+
+    await cdp.send("Input.dispatchMouseEvent", {
+      type: cdptype,
+      x: dev.x,
+      y: dev.y,
       button,
-      clickCount: p.clickCount && p.clickCount > 1 ? p.clickCount : 1,
+      buttons,
+      clickCount: payload.type === "dblclick" ? 2 : 1,
     });
+
     return true;
   } catch (error) {
     console.error(error);
-    throw new Error("PPTR_MOUSE_FAIL");
+    throw new Error("MOUSE_INJECT_FAIL");
   }
 }
 
