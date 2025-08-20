@@ -34,6 +34,7 @@ export interface CliArgs {
   height: number;
   token: string;
   env: "PROD" | "DEV" | "DEBUG" | "TESTING";
+  publicDir?: string;
   _: (string | number)[];
   $0: string;
 }
