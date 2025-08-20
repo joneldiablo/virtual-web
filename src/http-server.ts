@@ -2,7 +2,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import http from "http";
-import express, { Application } from "express";
+import express from "express";
 import type { HttpServerController } from "./types";
 
 /**
