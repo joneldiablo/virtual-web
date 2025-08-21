@@ -64,6 +64,7 @@ export function createWsServer(
     rbStartP = rb
       .start({
         url: opts.url,
+        isolate: opts.isolate,
         width: opts.width,
         height: opts.height,
         headful: opts.headful,
@@ -131,7 +132,11 @@ export function createWsServer(
 
   const recomputeFlow = () => {
     try {
-      const want = clients.size > 1 ? "multi" : "single";
+      const want = opts.isolate
+        ? "single"
+        : clients.size > 1
+        ? "multi"
+        : "single";
       if (flow.name === want) return;
       flow =
         want === "multi"

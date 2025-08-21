@@ -24,9 +24,47 @@ import type { RemoteBrowserStartOptions } from "./types";
  */
 export class RemoteBrowser {
   private browser: Browser | null = null;
-  private page: Page | null = null;
+  private pages: (Page | null)[] = [];
   private cdp: any | null = null;
   private running = false;
+  private isolate = false;
+  private cid = 0;
+
+  /**
+   * Active Puppeteer page. When `isolate` mode is enabled, the getter and
+   * setter index into {@link pages} using the current client identifier.
+   *
+   * @example
+   * ```ts
+   * const rb = new RemoteBrowser();
+   * rb.page = await browser.newPage(); // stored at index 0
+   * const pg = rb.page; // retrieves from index 0
+   * ```
+   */
+  get page(): Page | null {
+    const idx = this.isolate ? this.cid : 0;
+    return this.pages[idx] || null;
+  }
+
+  set page(p: Page | null) {
+    const idx = this.isolate ? this.cid : 0;
+    this.pages[idx] = p;
+  }
+
+  /**
+   * Set the active client identifier used by the {@link page} accessor when
+   * indexing {@link pages} in isolate mode.
+   *
+   * @example
+   * ```ts
+   * rb.setActiveCid(1);
+   * rb.page = somePage; // stored at index 1
+   * ```
+   * @param cid - Client identifier provided by the WebSocket layer.
+   */
+  setActiveCid(cid: number) {
+    this.cid = cid;
+  }
 
   private deviceWidth = 1280;
   private deviceHeight = 720;
@@ -39,6 +77,8 @@ export class RemoteBrowser {
     try {
       if (this.running) return true;
 
+      this.isolate = opts.isolate;
+      this.cid = 0;
       this.jpegQuality = Math.max(1, Math.min(100, opts.quality));
 
       this.browser = await puppeteer.launch({
@@ -52,11 +92,12 @@ export class RemoteBrowser {
       });
 
       const ctx = await this.browser.createBrowserContext();
-      this.page = await ctx.newPage();
-      await this.page.goto(opts.url, { waitUntil: "domcontentloaded" });
+      const pg = await ctx.newPage();
+      this.page = pg;
+      await pg.goto(opts.url, { waitUntil: "domcontentloaded" });
 
       // CDP session + screencast
-      this.cdp = await this.page.target().createCDPSession();
+      this.cdp = await pg.target().createCDPSession();
       await this.cdp.send("Page.enable");
 
       const everyNthFrame = Math.max(1, Math.round(60 / Math.max(1, opts.fps)));
@@ -84,7 +125,7 @@ export class RemoteBrowser {
       });
 
       // Expose a bridge to send clipboard out to Node
-      await this.page!.exposeFunction(
+      await pg.exposeFunction(
         "__vwbClipboardOut",
         (payload: { action: "copy" | "cut"; text: string }) => {
           try {
@@ -121,15 +162,15 @@ export class RemoteBrowser {
         })();
       `;
 
-      await this.page!.evaluateOnNewDocument(injectClipboardHooks());
+      await pg.evaluateOnNewDocument(injectClipboardHooks());
       try {
-        await this.page!.evaluate(injectClipboardHooks());
+        await pg.evaluate(injectClipboardHooks());
       } catch {}
 
       // Optionally, hook frames as they navigate (best-effort same-origin)
-      this.page!.on("framenavigated", async (frame) => {
+      pg.on("framenavigated", async (frame) => {
         try {
-          if (frame === this.page!.mainFrame()) return; // subframes only
+          if (frame === pg.mainFrame()) return; // subframes only
           await frame.evaluate(injectClipboardHooks());
         } catch {}
       });
@@ -159,6 +200,7 @@ export class RemoteBrowser {
       } catch {}
       this.browser = null;
       this.page = null;
+      this.pages = [];
       return true;
     } catch (e) {
       if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
@@ -179,10 +221,20 @@ export class RemoteBrowser {
     }
   }
 
-  /** Expose Puppeteer Page (throws if not ready). */
+  /**
+   * Expose the active Puppeteer {@link Page}. Throws if the page is not
+   * initialized.
+   *
+   * @example
+   * ```ts
+   * const pg = rb.getPage();
+   * pg.goto("https://example.com");
+   * ```
+   */
   getPage() {
-    if (!this.page) throw new Error("NO_PAGE");
-    return this.page;
+    const pg = this.page;
+    if (!pg) throw new Error("NO_PAGE");
+    return pg;
   }
 
   /** Expose current CDP session (throws if not ready). */
