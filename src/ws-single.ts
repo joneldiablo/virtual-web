@@ -5,7 +5,17 @@ import { injectMousePptr, injectWheelPptr } from "./mouse";
 import { injectKeyPptr } from "./keyboard";
 import { pasteText } from "./clipboard";
 
-/** Find the WebSocket currently using a CID (if any). */
+/**
+ * Locate the WebSocket associated with a given client ID.
+ *
+ * @param clients Map of sockets and their client identifiers.
+ * @param cid Client identifier to search for.
+ * @returns Matching socket or `null` if not found.
+ * @example
+ * ```ts
+ * const ws = findWsByCid(clients, 1);
+ * ```
+ */
 function findWsByCid(
   clients: Map<WebSocket, { cid: number }>,
   cid: number
