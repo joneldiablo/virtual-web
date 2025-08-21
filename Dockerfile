@@ -1,4 +1,24 @@
-# Imagen oficial con Chromium listo para Puppeteer
+# ---------- STAGE 1: BUILD ----------
+FROM node:20-bullseye AS builder
+
+WORKDIR /app
+
+# Habilita Yarn con Corepack
+RUN corepack enable && corepack prepare yarn@1.22.22 --activate
+
+# Copiamos manifests primero (mejor cache)
+COPY package.json yarn.lock ./
+
+# Instala TODAS las deps, incluidas dev
+RUN yarn install --frozen-lockfile
+
+# Copiamos el resto del proyecto
+COPY . .
+
+# Compilamos a dist/
+RUN yarn build
+
+# ---------- STAGE 2: RUNTIME ----------
 FROM ghcr.io/puppeteer/puppeteer:latest
 
 # Carpeta de trabajo
@@ -17,17 +37,14 @@ RUN corepack enable && corepack prepare yarn@1.22.22 --activate
 # Volver al usuario no-root
 USER pptruser
 
-# Copiar manifests primero para cachear instalación
-COPY package.json yarn.lock ./
+# Copiamos package.json/yarn.lock para instalar solo deps de producción
+COPY --chown=pptruser:pptruser package.json yarn.lock ./
+RUN yarn install --production --frozen-lockfile
 
-# Instalar dependencias (ajusta --production según tu flujo)
-# Si transpilas TS dentro del contenedor, quita --production
-RUN yarn install --production
+# Copiamos SOLO artefactos necesarios desde el builder
+COPY --chown=pptruser:pptruser --from=builder /app/dist ./dist
+COPY --chown=pptruser:pptruser --from=builder /app/bin ./bin
 
-# Copiar el resto del código
-COPY . .
-
-# Exponer (informativo). El puerto real lo leen de process.env.PORT
 EXPOSE 8085
 
 # Nota: en PaaS suele requerirse --no-sandbox
