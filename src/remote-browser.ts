@@ -38,29 +38,27 @@ export class RemoteBrowser {
 
   private clipGranted = false; // track permissions
 
-  /**
-   * Active page accessor. Stores the page and CDP session by client id and
-   * tracks the last active client.
-   *
-   * @example
-   * ```ts
-   * rb.page = { cid: 1, page, cdp };
-   * const current = rb.page; // returns the page for client 1
-   * ```
-   */
-  set page(data: { cid: number | string; page: Page; cdp: CDPSession }) {
-    const key = String(data.cid);
-    this.pages[key] = data.page;
-    this.cdps[key] = data.cdp;
-    this.cid = key;
-  }
-  get page(): Page | null {
-    return this.cid != null ? this.pages[this.cid] ?? null : null;
-  }
-
   /** Retrieve a page stored for a specific client id. */
   getPageByCid(cid: number | string): Page | undefined {
     return this.pages[String(cid)];
+  }
+
+  /**
+   * Set the active page by client id. The id must already exist in the
+   * internal registry.
+   */
+  usePage(cid: number | string): void {
+    const key = String(cid);
+    if (!this.pages[key]) throw new Error("NO_PAGE");
+    this.cid = key;
+  }
+
+  /** Return the currently active page (throws if none). */
+  getPage(): Page {
+    if (this.cid == null) throw new Error("NO_PAGE");
+    const page = this.pages[this.cid];
+    if (!page) throw new Error("NO_PAGE");
+    return page;
   }
 
   /** Close and remove page associated with cid. */
@@ -102,9 +100,15 @@ export class RemoteBrowser {
 
       this.running = true;
 
+      // Close the default blank page to avoid extra tabs
+      try {
+        const blanks = await this.browser.pages();
+        await Promise.all(blanks.map((p) => p.close()));
+      } catch {}
+
       if (!this.isIsolate) {
         await this.ensurePage({
-          cid: 0,
+          cid: "unique",
           url: opts.url,
           width: opts.width,
           height: opts.height,
@@ -123,7 +127,7 @@ export class RemoteBrowser {
 
   /** Ensure a page exists for the given client id. */
   async ensurePage(opts: {
-    cid: number;
+    cid: number | string;
     url: string;
     width: number;
     height: number;
@@ -133,29 +137,12 @@ export class RemoteBrowser {
     try {
       if (!this.browser) throw new Error("NO_BROWSER");
 
-      const key = String(opts.cid);
+      const key = this.isIsolate ? String(opts.cid) : "unique";
       let page = this.pages[key];
       let cdp = this.cdps[key];
 
       if (!page) {
-        if (Object.keys(this.pages).length === 0) {
-          const available = await this.browser.pages();
-          if (available.length) {
-            page = available.shift()!;
-            for (const p of available) {
-              if (p !== page) {
-                try {
-                  await p.close();
-                } catch {}
-              }
-            }
-          } else {
-            page = await this.browser.newPage();
-          }
-        } else {
-          page = await this.browser.newPage();
-        }
-
+        page = await this.browser.newPage();
         await page.setViewport({
           width: opts.width,
           height: opts.height,
@@ -236,10 +223,13 @@ export class RemoteBrowser {
             await frame.evaluate(injectClipboardHooks());
           } catch {}
         });
+
+        this.pages[key] = page;
+        this.cdps[key] = cdp!;
       }
 
       // activate
-      this.page = { cid: key, page, cdp: cdp! };
+      this.cid = key;
 
       return true;
     } catch (e) {
@@ -277,20 +267,14 @@ export class RemoteBrowser {
 
   async goto(url: string): Promise<boolean> {
     try {
-      if (!this.page) throw new Error("NO_PAGE");
-      await this.page.goto(url, { waitUntil: "domcontentloaded" });
+      const page = this.getPage();
+      await page.goto(url, { waitUntil: "domcontentloaded" });
       return true;
     } catch (e) {
       if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
       else console.error(e.message);
       return false;
     }
-  }
-
-  /** Expose Puppeteer Page (throws if not ready). */
-  getPage() {
-    if (!this.page) throw new Error("NO_PAGE");
-    return this.page;
   }
 
   /** Expose current CDP session (throws if not ready). */
@@ -321,7 +305,7 @@ export class RemoteBrowser {
    */
   async resizeViewport(width: number, height: number): Promise<boolean> {
     try {
-      if (!this.page) throw new Error("NO_PAGE");
+      const page = this.getPage();
       // Guardrails
       const w = Math.max(320, Math.floor(width));
       const h = Math.max(240, Math.floor(height));
@@ -329,7 +313,7 @@ export class RemoteBrowser {
       // Skip if same size
       if (w === this.deviceWidth && h === this.deviceHeight) return true;
 
-      await this.page.setViewport({
+      await page.setViewport({
         width: w,
         height: h,
         deviceScaleFactor: 1,
@@ -369,9 +353,10 @@ export class RemoteBrowser {
   async ensureClipboardPermissions(): Promise<boolean> {
     try {
       if (this.clipGranted) return true;
-      if (!this.browser || !this.page) throw new Error("NO_PAGE");
+      if (!this.browser) throw new Error("NO_PAGE");
+      const page = this.getPage();
       const ctx = this.browser.defaultBrowserContext();
-      const origin = new URL(this.page.url()).origin;
+      const origin = new URL(page.url()).origin;
       try {
         await ctx.overridePermissions(origin, [
           "clipboard-read",
@@ -400,11 +385,11 @@ export class RemoteBrowser {
    */
   async setClipboardText(text: string): Promise<boolean> {
     try {
-      if (!this.page) throw new Error("NO_PAGE");
+      const page = this.getPage();
       await this.ensureClipboardPermissions();
 
       // IMPORTANT: do not use "async" in the page function (TS would inject __awaiter).
-      await this.page.evaluate((t: string) => {
+      await page.evaluate((t: string) => {
         // Promise chain only; no async/await here
         return navigator.clipboard
           .writeText("") // clear first
@@ -426,18 +411,18 @@ export class RemoteBrowser {
    */
   async pasteFromClipboard(text: string): Promise<true> {
     try {
-      if (!this.page) throw new Error("NO_PAGE");
+      const page = this.getPage();
       try {
         await this.setClipboardText(text);
         const isMac = process.platform === "darwin";
         if (isMac) {
-          await this.page.keyboard.down("Meta");
-          await this.page.keyboard.press("v");
-          await this.page.keyboard.up("Meta");
+          await page.keyboard.down("Meta");
+          await page.keyboard.press("v");
+          await page.keyboard.up("Meta");
         } else {
-          await this.page.keyboard.down("Control");
-          await this.page.keyboard.press("v");
-          await this.page.keyboard.up("Control");
+          await page.keyboard.down("Control");
+          await page.keyboard.press("v");
+          await page.keyboard.up("Control");
         }
         return true;
       } catch (permOrWriteErr) {

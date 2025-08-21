@@ -65,5 +65,6 @@ streaming frames from the provided URL. Pass `--isolate` to open one page per
 WebSocket client. When isolation is enabled, pages are mapped by client ID so
 each connection receives its own dedicated page, and existing sessions remain
 active when additional clients join. Pages are tracked by session ID to ensure
-tabs are cleaned up correctly on disconnect or reconnect.
+tabs are cleaned up correctly on disconnect or reconnect, and reconnecting
+clients always start with a fresh page.
 

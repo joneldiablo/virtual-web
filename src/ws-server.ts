@@ -90,7 +90,7 @@ export function createWsServer(
         });
 
     return rbStartP.then(async () => {
-      if (opts.isolate)
+      if (opts.isolate) {
         await rb.ensurePage({
           cid,
           url: opts.url,
@@ -106,6 +106,9 @@ export function createWsServer(
               payload: { action: ev.action, text: ev.text || "" },
             }),
         });
+      } else {
+        rb.usePage("unique");
+      }
       return true as const;
     });
   };

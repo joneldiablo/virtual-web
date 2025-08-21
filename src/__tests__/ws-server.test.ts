@@ -18,6 +18,7 @@ const startMock = jest.fn().mockResolvedValue(true);
 const ensurePageMock = jest.fn().mockResolvedValue(true);
 const stopMock = jest.fn().mockResolvedValue(true);
 const closePageMock = jest.fn().mockResolvedValue(true);
+const usePageMock = jest.fn();
 
 jest.mock("../remote-browser", () => ({
   RemoteBrowser: jest.fn().mockImplementation(() => ({
@@ -25,6 +26,7 @@ jest.mock("../remote-browser", () => ({
     ensurePage: ensurePageMock,
     stop: stopMock,
     closePage: closePageMock,
+    usePage: usePageMock,
   })),
 }));
 

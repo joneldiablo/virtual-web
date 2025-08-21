@@ -96,9 +96,10 @@ export function createSingleFlow(ctx: FlowContext): Flow {
                   (other as any).close(4001, "Replaced by reconnect");
                 } catch {}
               }
+              if (ctx.opts.isolate) await ctx.rb.closePage(want);
               const oldCid = rec.cid;
               rec.cid = want;
-              await ctx.rb.closePage(oldCid);
+              if (ctx.opts.isolate) await ctx.rb.closePage(oldCid);
             }
 
             // 2) Ensure page and allow free resize

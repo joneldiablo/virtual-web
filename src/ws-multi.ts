@@ -140,8 +140,9 @@ export function createMultiFlow(ctx: FlowContext): Flow {
                   (other as any).close(4001, "Replaced by reconnect");
                 } catch {}
               }
+              if (ctx.opts.isolate) await ctx.rb.closePage(want);
               rec.cid = want;
-              await ctx.rb.closePage(oldCid);
+              if (ctx.opts.isolate) await ctx.rb.closePage(oldCid);
               if (
                 leaderCid != null &&
                 (oldCid === leaderCid || want === leaderCid)
