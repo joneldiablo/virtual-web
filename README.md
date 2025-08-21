@@ -11,6 +11,7 @@ that clients can interact with the browser as if it were local.
 * Static HTTP server for serving the client bundle.
 * WebSocket server that proxies keyboard, mouse, wheel and clipboard events.
 * Automatic switch between single-client and multi-client modes.
+* Optional isolation that opens a dedicated Chromium page for each WebSocket client.
 * Helpers for precise coordinate mapping and clipboard management.
 * Centralized type definitions under `src/types.ts` for consistent reuse.
 
@@ -56,9 +57,10 @@ that clients can interact with the browser as if it were local.
 ## Usage
 
 ```bash
-ts-node src/cli.ts --url https://example.com --port 8080
+ts-node src/cli.ts --url https://example.com --port 8080 --isolate
 ```
 
 This command starts the HTTP and WebSocket servers, launches Chromium and begins
-streaming frames from the provided URL.
+streaming frames from the provided URL. Pass `--isolate` to open one page per
+WebSocket client.
 

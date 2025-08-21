@@ -40,6 +40,16 @@ const args = yargs(hideBin(process.argv))
         : false,
     describe: "Launch Chromium UI (reserved)",
   })
+  .option("isolate", {
+    type: "boolean",
+    default:
+      typeof process.env.ISOLATE === "string"
+        ? ["1", "true", "yes", "on"].includes(
+            process.env.ISOLATE.toLowerCase()
+          )
+        : false,
+    describe: "Open a dedicated page per WebSocket client",
+  })
   .option("width", {
     type: "number",
     default: Number(process.env.WIDTH) || 1280,
@@ -98,6 +108,7 @@ const main = async (cli: CliArgs) => {
       headful: cli.headful,
       quality: cli.quality,
       fps: cli.fps,
+      isolate: cli.isolate,
     });
 
     const handleSignal = async (sig: string) => {

@@ -96,9 +96,9 @@ export function createMultiFlow(ctx: FlowContext): Flow {
       sendMode();
 
       try {
-        await ctx.ensureRemoteBrowser();
-        if (ctx.lastFrameRef.value)
-          ctx.wsSend(ws, { type: "frame", payload: ctx.lastFrameRef.value });
+        await ctx.ensureRemoteBrowser(cid, ws);
+        const last = ctx.lastFrameRef.get(0);
+        if (last) ctx.wsSend(ws, { type: "frame", payload: last });
         try {
           const snap = await ctx.rb.captureFrame();
           ctx.wsSend(ws, { type: "frame", payload: snap });
@@ -124,7 +124,7 @@ export function createMultiFlow(ctx: FlowContext): Flow {
           }
 
           case "hello": {
-            await ctx.ensureRemoteBrowser();
+            await ctx.ensureRemoteBrowser(cid, ws);
 
             const rec = ctx.clients.get(ws as any);
             if (!rec) break;
@@ -185,11 +185,12 @@ export function createMultiFlow(ctx: FlowContext): Flow {
           }
 
           case "requestFrame": {
-            await ctx.ensureRemoteBrowser();
-            if (ctx.lastFrameRef.value)
+            await ctx.ensureRemoteBrowser(cid, ws);
+            const last = ctx.lastFrameRef.get(0);
+            if (last)
               ctx.wsSend(ws, {
                 type: "frame",
-                payload: ctx.lastFrameRef.value,
+                payload: last,
               });
             try {
               const snap = await ctx.rb.captureFrame();
@@ -199,7 +200,7 @@ export function createMultiFlow(ctx: FlowContext): Flow {
           }
 
           case "resize": {
-            await ctx.ensureRemoteBrowser();
+            await ctx.ensureRemoteBrowser(cid, ws);
             const rec = ctx.clients.get(ws as any);
             if (!rec) break;
             if (
@@ -223,25 +224,25 @@ export function createMultiFlow(ctx: FlowContext): Flow {
           }
 
           case "mouse": {
-            await ctx.ensureRemoteBrowser();
+            await ctx.ensureRemoteBrowser(cid, ws);
             await injectMousePptr(ctx.rb, msg.payload);
             broadcastCursor(ctx.clients.get(ws as any)?.cid!, msg.payload);
             break;
           }
 
           case "wheel": {
-            await ctx.ensureRemoteBrowser();
+            await ctx.ensureRemoteBrowser(cid, ws);
             await injectWheelPptr(ctx.rb, msg.payload);
             break;
           }
           case "key": {
-            await ctx.ensureRemoteBrowser();
+            await ctx.ensureRemoteBrowser(cid, ws);
             await injectKeyPptr(ctx.rb, msg.payload);
             break;
           }
 
           case "clipboard": {
-            await ctx.ensureRemoteBrowser();
+            await ctx.ensureRemoteBrowser(cid, ws);
             if (msg?.payload?.action === "paste") {
               const text = String(msg?.payload?.text ?? "");
               if (text) await pasteText(ctx.rb, text);

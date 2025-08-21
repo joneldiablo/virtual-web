@@ -42,7 +42,7 @@ export function createWsServer(
   // --- RB + frame cache ---
   const rb = new RemoteBrowser();
   let rbStartP: Promise<true> | null = null;
-  const lastFrameRef = { value: null as string | null };
+  const lastFrameRef = new Map<number, string | null>();
 
   // --- helpers ---
   const wsSend = (ws: WebSocket, msg: any) => {
@@ -59,35 +59,55 @@ export function createWsServer(
       } catch {}
     }
   };
-  const ensureRemoteBrowser = (): Promise<true> => {
-    if (rbStartP) return rbStartP;
-    rbStartP = rb
-      .start({
-        url: opts.url,
-        width: opts.width,
-        height: opts.height,
-        headful: opts.headful,
-        quality: opts.quality,
-        fps: opts.fps,
-        onFrame: (base64) => {
-          lastFrameRef.value = base64;
-          broadcast({ type: "frame", payload: base64 });
-        },
-        onClipboard: (ev) =>
-          broadcast({
-            type: "clipboard",
-            payload: { action: ev.action, text: ev.text || "" },
-          }),
-      })
-      .then((r) => {
-        console.log("[vwb] RemoteBrowser started");
-        return r;
-      })
-      .catch((e) => {
-        rbStartP = null;
-        throw e;
-      });
-    return rbStartP;
+  const ensureRemoteBrowser = (cid: number, ws: WebSocket): Promise<true> => {
+    if (!rbStartP)
+      rbStartP = rb
+        .start({
+          url: opts.url,
+          width: opts.width,
+          height: opts.height,
+          headful: opts.headful,
+          quality: opts.quality,
+          fps: opts.fps,
+          isolate: opts.isolate,
+          onFrame: (base64) => {
+            lastFrameRef.set(0, base64);
+            broadcast({ type: "frame", payload: base64 });
+          },
+          onClipboard: (ev) =>
+            broadcast({
+              type: "clipboard",
+              payload: { action: ev.action, text: ev.text || "" },
+            }),
+        })
+        .then((r) => {
+          console.log("[vwb] RemoteBrowser started");
+          return r;
+        })
+        .catch((e) => {
+          rbStartP = null;
+          throw e;
+        });
+
+    return rbStartP.then(async () => {
+      if (opts.isolate)
+        await rb.ensurePage({
+          cid,
+          url: opts.url,
+          width: opts.width,
+          height: opts.height,
+          onFrame: (img) => {
+            lastFrameRef.set(cid, img);
+            wsSend(ws, { type: "frame", payload: img });
+          },
+          onClipboard: (ev) =>
+            wsSend(ws, {
+              type: "clipboard",
+              payload: { action: ev.action, text: ev.text || "" },
+            }),
+        });
+      return true;
+    });
   };
   const getMetrics = () => {
     try {
@@ -130,6 +150,7 @@ export function createWsServer(
   });
 
   const recomputeFlow = () => {
+    if (opts.isolate) return;
     try {
       const want = clients.size > 1 ? "multi" : "single";
       if (flow.name === want) return;
@@ -201,20 +222,36 @@ export function createWsServer(
       }
     });
 
-    ws.on("close", () => {
+    ws.on("close", async () => {
       clients.delete(ws as unknown as WebSocket);
       recomputeFlow();
+      if (opts.isolate) {
+        await rb.closePage(cid);
+        lastFrameRef.delete(cid);
+        if (clients.size === 0) {
+          await rb.stop();
+          rbStartP = null;
+        }
+      }
       try {
         flow.onDisconnect(ws as any, cid);
       } catch {}
     });
 
-    ws.on("error", () => {
+    ws.on("error", async () => {
       clients.delete(ws as unknown as WebSocket);
       try {
         /* @ts-ignore */ ws.close();
       } catch {}
       recomputeFlow();
+      if (opts.isolate) {
+        await rb.closePage(cid);
+        lastFrameRef.delete(cid);
+        if (clients.size === 0) {
+          await rb.stop();
+          rbStartP = null;
+        }
+      }
       try {
         flow.onDisconnect(ws as any, cid);
       } catch {}

@@ -33,6 +33,8 @@ export interface CliArgs {
   width: number;
   height: number;
   token: string;
+  /** Whether to isolate each client in its own page */
+  isolate?: boolean;
   env: "PROD" | "DEV" | "DEBUG" | "TESTING";
   publicDir?: string;
   _: (string | number)[];
@@ -64,6 +66,7 @@ export interface RemoteBrowserStartOptions {
   fps: number;
   onFrame: (base64: string) => void;
   onClipboard?: (ev: { action: "copy" | "cut"; text: string }) => void;
+  isolate?: boolean;
 }
 
 /** Controller returned by {@link createHttpServer}. */
@@ -192,6 +195,8 @@ export interface CreateWsServerOptions {
   headful: boolean;
   quality: number;
   fps: number;
+  /** Isolate each WebSocket client in its own page */
+  isolate?: boolean;
 }
 
 /**
@@ -214,14 +219,15 @@ export interface CreateWsServerOptions {
 export interface FlowContext {
   opts: CreateWsServerOptions;
   rb: RemoteBrowser;
-  ensureRemoteBrowser: () => Promise<true>;
+  /** Ensure that the remote browser and page for a client are ready */
+  ensureRemoteBrowser: (cid: number, ws: WebSocket) => Promise<true>;
 
   clients: Map<WebSocket, { cid: number }>;
   wsSend: (ws: WebSocket, msg: any) => void;
   broadcast: (msg: any) => void;
 
-  /** Shared last-frame cache */
-  lastFrameRef: { value: string | null };
+  /** Shared last-frame cache keyed by client id */
+  lastFrameRef: Map<number, string | null>;
 
   /** Device metrics getter */
   getMetrics: () => { deviceWidth: number; deviceHeight: number };
