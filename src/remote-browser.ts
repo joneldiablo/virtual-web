@@ -53,7 +53,7 @@ export class RemoteBrowser {
 
       this.browser.on("disconnected", () => {
         console.error("[vwb] Browser closed -> shutting down program");
-        throw new Error("BROWSER_IS_GONE");
+        if (!opts.isolate) throw new Error("BROWSER_IS_GONE");
       });
 
       const pages = Array.from(await this.browser.pages());
