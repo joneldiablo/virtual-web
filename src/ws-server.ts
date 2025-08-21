@@ -223,37 +223,41 @@ export function createWsServer(
     });
 
     ws.on("close", async () => {
+      const rec = clients.get(ws as unknown as WebSocket);
+      const currentCid = rec?.cid ?? cid;
       clients.delete(ws as unknown as WebSocket);
       recomputeFlow();
       if (opts.isolate) {
-        await rb.closePage(cid);
-        lastFrameRef.delete(cid);
+        await rb.closePage(currentCid);
+        lastFrameRef.delete(currentCid);
         if (clients.size === 0) {
           await rb.stop();
           rbStartP = null;
         }
       }
       try {
-        flow.onDisconnect(ws as any, cid);
+        flow.onDisconnect(ws as any, currentCid);
       } catch {}
     });
 
     ws.on("error", async () => {
+      const rec = clients.get(ws as unknown as WebSocket);
+      const currentCid = rec?.cid ?? cid;
       clients.delete(ws as unknown as WebSocket);
       try {
         /* @ts-ignore */ ws.close();
       } catch {}
       recomputeFlow();
       if (opts.isolate) {
-        await rb.closePage(cid);
-        lastFrameRef.delete(cid);
+        await rb.closePage(currentCid);
+        lastFrameRef.delete(currentCid);
         if (clients.size === 0) {
           await rb.stop();
           rbStartP = null;
         }
       }
       try {
-        flow.onDisconnect(ws as any, cid);
+        flow.onDisconnect(ws as any, currentCid);
       } catch {}
     });
   };

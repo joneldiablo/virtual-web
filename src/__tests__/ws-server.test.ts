@@ -30,15 +30,19 @@ jest.mock("../remote-browser", () => ({
 
 const createSingleFlowMock = jest.fn((args: any) => ({
   name: "single",
-  onConnect: jest.fn((ws: any, cid: number) => args.ensureRemoteBrowser(cid, ws)),
-  onMessage: jest.fn(),
+  onConnect: jest.fn(),
+  onMessage: jest.fn((ws: any, cid: number, msg: any) => {
+    if (msg.type === "hello") return args.ensureRemoteBrowser(cid, ws);
+  }),
   onDisconnect: jest.fn(),
   onSwitchIn: jest.fn(),
 }));
 const createMultiFlowMock = jest.fn((args: any) => ({
   name: "multi",
-  onConnect: jest.fn((ws: any, cid: number) => args.ensureRemoteBrowser(cid, ws)),
-  onMessage: jest.fn(),
+  onConnect: jest.fn(),
+  onMessage: jest.fn((ws: any, cid: number, msg: any) => {
+    if (msg.type === "hello") return args.ensureRemoteBrowser(cid, ws);
+  }),
   onDisconnect: jest.fn(),
   onSwitchIn: jest.fn(),
 }));
@@ -83,9 +87,7 @@ describe("createWsServer isolate mode", () => {
 
     const ws1 = makeWs();
     wsHandler(ws1 as any, { url: "/ws" } as any);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await ws1.handlers.message(JSON.stringify({ type: "hello" }));
     expect(startMock).toHaveBeenCalledTimes(1);
     expect(ensurePageMock).toHaveBeenCalledWith(
       expect.objectContaining({ cid: 1 })
@@ -93,9 +95,7 @@ describe("createWsServer isolate mode", () => {
 
     const ws2 = makeWs();
     wsHandler(ws2 as any, { url: "/ws" } as any);
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await ws2.handlers.message(JSON.stringify({ type: "hello" }));
     expect(ensurePageMock).toHaveBeenCalledWith(
       expect.objectContaining({ cid: 2 })
     );

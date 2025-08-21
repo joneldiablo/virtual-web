@@ -90,20 +90,10 @@ export function createMultiFlow(ctx: FlowContext): Flow {
       sendMode();
     },
 
-    onConnect: async (ws, cid) => {
-      // No proactive hello: the client will send hello with its clientId and we confirm.
+    onConnect: async (_ws, _cid) => {
+      // Wait for "hello" before ensuring a page for the client
       if (!leaderCid) chooseLeader();
       sendMode();
-
-      try {
-        await ctx.ensureRemoteBrowser(cid, ws);
-        const last = ctx.lastFrameRef.get(0);
-        if (last) ctx.wsSend(ws, { type: "frame", payload: last });
-        try {
-          const snap = await ctx.rb.captureFrame();
-          ctx.wsSend(ws, { type: "frame", payload: snap });
-        } catch {}
-      } catch {}
     },
 
     onDisconnect: () => {
@@ -126,8 +116,6 @@ export function createMultiFlow(ctx: FlowContext): Flow {
           }
 
           case "hello": {
-            await ctx.ensureRemoteBrowser(cid, ws);
-
             const rec = ctx.clients.get(ws as any);
             if (!rec) break;
 
@@ -153,12 +141,15 @@ export function createMultiFlow(ctx: FlowContext): Flow {
                 } catch {}
               }
               rec.cid = want;
+              await ctx.rb.closePage(oldCid);
               if (
                 leaderCid != null &&
                 (oldCid === leaderCid || want === leaderCid)
               )
                 leaderCid = want;
             }
+
+            await ctx.ensureRemoteBrowser(rec.cid, ws);
 
             // (2) Only the leader may resize
             if (

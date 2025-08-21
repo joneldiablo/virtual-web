@@ -56,26 +56,17 @@ export function createSingleFlow(ctx: FlowContext): Flow {
       sendMode();
     },
 
-    onConnect: async (ws, cid) => {
-      // No proactive hello here; wait for the client's "hello" to confirm cid
-      try {
-        await ctx.ensureRemoteBrowser(cid, ws);
-        sendMode();
-        const last = ctx.lastFrameRef.get(cid);
-        if (last)
-          ctx.wsSend(ws, { type: "frame", payload: last });
-        try {
-          const snap = await ctx.rb.captureFrame();
-          ctx.wsSend(ws, { type: "frame", payload: snap });
-        } catch {}
-      } catch {}
+    onConnect: async (_ws, _cid) => {
+      // Defer page creation until the client sends "hello" with its session id
+      sendMode();
     },
 
     onDisconnect: () => {
       sendMode();
     },
 
-    onMessage: async (ws, cid, msg) => {
+    onMessage: async (ws, baseCid, msg) => {
+      const cid = ctx.clients.get(ws as any)?.cid ?? baseCid;
       try {
         switch (msg.type) {
           case "ping": {
@@ -92,7 +83,6 @@ export function createSingleFlow(ctx: FlowContext): Flow {
             if (want > 0 && want !== rec.cid) {
               const other = findWsByCid(ctx.clients, want);
               if (other && other !== ws) {
-                // Close previous holder; cleanup happens in base ws handler
                 try {
                   ctx.wsSend(other, {
                     type: "error",
@@ -106,16 +96,18 @@ export function createSingleFlow(ctx: FlowContext): Flow {
                   (other as any).close(4001, "Replaced by reconnect");
                 } catch {}
               }
+              const oldCid = rec.cid;
               rec.cid = want;
+              await ctx.rb.closePage(oldCid);
             }
 
-            // 2) Free resize in single flow
+            // 2) Ensure page and allow free resize
+            await ctx.ensureRemoteBrowser(rec.cid, ws);
             if (
               msg?.payload &&
               typeof msg.payload.canvasWidth === "number" &&
               typeof msg.payload.canvasHeight === "number"
             ) {
-              await ctx.ensureRemoteBrowser(cid, ws);
               await ctx.rb.resizeViewport(
                 msg.payload.canvasWidth | 0,
                 msg.payload.canvasHeight | 0

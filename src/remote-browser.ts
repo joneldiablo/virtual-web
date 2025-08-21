@@ -24,9 +24,9 @@ import type { RemoteBrowserStartOptions } from "./types";
  */
 export class RemoteBrowser {
   private browser: Browser | null = null;
-  private pages: Page[] = [];
-  private cdps: CDPSession[] = [];
-  private cid: number | null = null;
+  private pages: Record<string, Page> = {};
+  private cdps: Record<string, CDPSession> = {};
+  private cid: string | null = null;
   private running = false;
 
   private deviceWidth = 1280;
@@ -48,30 +48,32 @@ export class RemoteBrowser {
    * const current = rb.page; // returns the page for client 1
    * ```
    */
-  set page(data: { cid: number; page: Page; cdp: CDPSession }) {
-    this.pages[data.cid] = data.page;
-    this.cdps[data.cid] = data.cdp;
-    this.cid = data.cid;
+  set page(data: { cid: number | string; page: Page; cdp: CDPSession }) {
+    const key = String(data.cid);
+    this.pages[key] = data.page;
+    this.cdps[key] = data.cdp;
+    this.cid = key;
   }
   get page(): Page | null {
     return this.cid != null ? this.pages[this.cid] ?? null : null;
   }
 
   /** Retrieve a page stored for a specific client id. */
-  getPageByCid(cid: number): Page | undefined {
-    return this.pages[cid];
+  getPageByCid(cid: number | string): Page | undefined {
+    return this.pages[String(cid)];
   }
 
   /** Close and remove page associated with cid. */
-  async closePage(cid: number): Promise<void> {
-    const p = this.pages[cid];
+  async closePage(cid: number | string): Promise<void> {
+    const key = String(cid);
+    const p = this.pages[key];
     if (p) {
       try {
         await p.close();
       } catch {}
-      delete this.pages[cid];
-      delete this.cdps[cid];
-      if (this.cid === cid) this.cid = null;
+      delete this.pages[key];
+      delete this.cdps[key];
+      if (this.cid === key) this.cid = null;
     }
   }
 
@@ -131,11 +133,12 @@ export class RemoteBrowser {
     try {
       if (!this.browser) throw new Error("NO_BROWSER");
 
-      let page = this.pages[opts.cid];
-      let cdp = this.cdps[opts.cid];
+      const key = String(opts.cid);
+      let page = this.pages[key];
+      let cdp = this.cdps[key];
 
       if (!page) {
-        if (!this.pages.length) {
+        if (Object.keys(this.pages).length === 0) {
           const available = await this.browser.pages();
           if (available.length) {
             page = available.shift()!;
@@ -236,7 +239,7 @@ export class RemoteBrowser {
       }
 
       // activate
-      this.page = { cid: opts.cid, page, cdp: cdp! };
+      this.page = { cid: key, page, cdp: cdp! };
 
       return true;
     } catch (e) {
@@ -250,7 +253,7 @@ export class RemoteBrowser {
     try {
       this.running = false;
       try {
-        for (const c of this.cdps) {
+        for (const c of Object.values(this.cdps)) {
           try {
             await c?.send("Page.stopScreencast");
           } catch {}
@@ -260,8 +263,8 @@ export class RemoteBrowser {
         await this.browser?.close();
       } catch {}
       this.browser = null;
-      this.pages = [];
-      this.cdps = [];
+      this.pages = {};
+      this.cdps = {};
       this.cid = null;
       this.clipGranted = false;
       return true;
