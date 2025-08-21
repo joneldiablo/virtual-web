@@ -15,6 +15,7 @@ import type { RemoteBrowser } from "./remote-browser";
  *   quality: 60,
  *   fps: 30,
  *   headful: false,
+ *   isolate: false,
  *   width: 1280,
  *   height: 720,
  *   token: "",
@@ -30,6 +31,7 @@ export interface CliArgs {
   quality: number;
   fps: number;
   headful: boolean;
+  isolate: boolean;
   width: number;
   height: number;
   token: string;
@@ -52,6 +54,7 @@ export interface CliArgs {
  *   quality: 60,
  *   fps: 30,
  *   onFrame: (img) => console.log(img.slice(0, 20)),
+ *   isolate: false,
  * };
  * ```
  */
@@ -64,6 +67,11 @@ export interface RemoteBrowserStartOptions {
   fps: number;
   onFrame: (base64: string) => void;
   onClipboard?: (ev: { action: "copy" | "cut"; text: string }) => void;
+  /**
+   * When true the browser is tied to a single session and disconnects
+   * should not propagate an error.
+   */
+  isolate?: boolean;
 }
 
 /** Controller returned by {@link createHttpServer}. */
@@ -192,6 +200,7 @@ export interface CreateWsServerOptions {
   headful: boolean;
   quality: number;
   fps: number;
+  isolate: boolean;
 }
 
 /**
