@@ -135,15 +135,23 @@ export class RemoteBrowser {
       let cdp = this.cdps[opts.cid];
 
       if (!page) {
-        const available = await this.browser.pages();
-        if (available.length && !this.pages.length)
-          page = available.shift()!;
-        else page = await this.browser.newPage();
-
-        // close extras when taking first page
-        available.forEach((p) => {
-          if (p !== page) p.close();
-        });
+        if (!this.pages.length) {
+          const available = await this.browser.pages();
+          if (available.length) {
+            page = available.shift()!;
+            for (const p of available) {
+              if (p !== page) {
+                try {
+                  await p.close();
+                } catch {}
+              }
+            }
+          } else {
+            page = await this.browser.newPage();
+          }
+        } else {
+          page = await this.browser.newPage();
+        }
 
         await page.setViewport({
           width: opts.width,

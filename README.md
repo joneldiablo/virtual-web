@@ -63,5 +63,6 @@ ts-node src/cli.ts --url https://example.com --port 8080 --isolate
 This command starts the HTTP and WebSocket servers, launches Chromium and begins
 streaming frames from the provided URL. Pass `--isolate` to open one page per
 WebSocket client. When isolation is enabled, pages are mapped by client ID so
-each connection receives its own dedicated page.
+each connection receives its own dedicated page, and existing sessions remain
+active when additional clients join.
 
