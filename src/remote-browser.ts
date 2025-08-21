@@ -24,22 +24,66 @@ import type { RemoteBrowserStartOptions } from "./types";
  */
 export class RemoteBrowser {
   private browser: Browser | null = null;
-  private page: Page | null = null;
-  private cdp: CDPSession | null = null;
+  private pages: Record<string, Page> = {};
+  private cdps: Record<string, CDPSession> = {};
+  private cid: string | null = null;
   private running = false;
 
   private deviceWidth = 1280;
   private deviceHeight = 720;
   private pageScale = 1;
   private jpegQuality = 60;
+  private fps = 30;
+  private isIsolate = false;
 
   private clipGranted = false; // track permissions
+
+  /**
+   * Active page accessor. Stores the page and CDP session by client id and
+   * tracks the last active client.
+   *
+   * @example
+   * ```ts
+   * rb.page = { cid: 1, page, cdp };
+   * const current = rb.page; // returns the page for client 1
+   * ```
+   */
+  set page(data: { cid: number | string; page: Page; cdp: CDPSession }) {
+    const key = String(data.cid);
+    this.pages[key] = data.page;
+    this.cdps[key] = data.cdp;
+    this.cid = key;
+  }
+  get page(): Page | null {
+    return this.cid != null ? this.pages[this.cid] ?? null : null;
+  }
+
+  /** Retrieve a page stored for a specific client id. */
+  getPageByCid(cid: number | string): Page | undefined {
+    return this.pages[String(cid)];
+  }
+
+  /** Close and remove page associated with cid. */
+  async closePage(cid: number | string): Promise<void> {
+    const key = String(cid);
+    const p = this.pages[key];
+    if (p) {
+      try {
+        await p.close();
+      } catch {}
+      delete this.pages[key];
+      delete this.cdps[key];
+      if (this.cid === key) this.cid = null;
+    }
+  }
 
   async start(opts: RemoteBrowserStartOptions): Promise<true> {
     try {
       if (this.running) return true;
 
       this.jpegQuality = Math.max(1, Math.min(100, opts.quality));
+      this.fps = opts.fps;
+      this.isIsolate = !!opts.isolate;
 
       this.browser = await puppeteer.launch({
         headless: !opts.headful,
@@ -53,56 +97,108 @@ export class RemoteBrowser {
 
       this.browser.on("disconnected", () => {
         console.error("[vwb] Browser closed -> shutting down program");
-        throw new Error("BROWSER_IS_GONE");
+        if (!this.isIsolate) throw new Error("BROWSER_IS_GONE");
       });
 
-      const pages = Array.from(await this.browser.pages());
-      this.page = pages.shift() || (await this.browser.newPage());
-      // --- close other pages, not need await it
-      pages.map((p) => p.close());
+      this.running = true;
 
-      await this.page.goto(opts.url, { waitUntil: "domcontentloaded" });
+      if (!this.isIsolate) {
+        await this.ensurePage({
+          cid: 0,
+          url: opts.url,
+          width: opts.width,
+          height: opts.height,
+          onFrame: opts.onFrame,
+          onClipboard: opts.onClipboard,
+        });
+      }
 
-      // CDP session + screencast
-      this.cdp = await this.page.target().createCDPSession();
-      await this.cdp.send("Page.enable");
+      return true;
+    } catch (e) {
+      if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
+      else console.error(e.message);
+      throw new Error("RB_START_FAIL");
+    }
+  }
 
-      const everyNthFrame = Math.max(1, Math.round(60 / Math.max(1, opts.fps)));
-      await this.cdp.send("Page.startScreencast", {
-        format: "jpeg",
-        quality: this.jpegQuality,
-        everyNthFrame,
-      });
+  /** Ensure a page exists for the given client id. */
+  async ensurePage(opts: {
+    cid: number;
+    url: string;
+    width: number;
+    height: number;
+    onFrame: (base64: string) => void;
+    onClipboard?: (ev: { action: "copy" | "cut"; text: string }) => void;
+  }): Promise<true> {
+    try {
+      if (!this.browser) throw new Error("NO_BROWSER");
 
-      this.cdp.on("Page.screencastFrame", async (evt: any) => {
-        try {
-          this.deviceWidth = evt?.metadata?.deviceWidth || this.deviceWidth;
-          this.deviceHeight = evt?.metadata?.deviceHeight || this.deviceHeight;
-          this.pageScale = evt?.metadata?.pageScaleFactor || this.pageScale;
-          opts.onFrame(evt.data);
-          await this.cdp!.send("Page.screencastFrameAck", {
-            sessionId: evt.sessionId,
-          });
-        } catch (e) {
-          console.error("[rb] frame error:");
-          if (process.env.ENV !== "PROD" || !(e instanceof Error))
-            console.error(e);
-          else console.error(e.message);
+      const key = String(opts.cid);
+      let page = this.pages[key];
+      let cdp = this.cdps[key];
+
+      if (!page) {
+        if (Object.keys(this.pages).length === 0) {
+          const available = await this.browser.pages();
+          if (available.length) {
+            page = available.shift()!;
+            for (const p of available) {
+              if (p !== page) {
+                try {
+                  await p.close();
+                } catch {}
+              }
+            }
+          } else {
+            page = await this.browser.newPage();
+          }
+        } else {
+          page = await this.browser.newPage();
         }
-      });
 
-      // Expose a bridge to send clipboard out to Node
-      await this.page!.exposeFunction(
-        "__vwbClipboardOut",
-        (payload: { action: "copy" | "cut"; text: string }) => {
+        await page.setViewport({
+          width: opts.width,
+          height: opts.height,
+          deviceScaleFactor: 1,
+        });
+        await page.goto(opts.url, { waitUntil: "domcontentloaded" });
+
+        cdp = await page.target().createCDPSession();
+        await cdp.send("Page.enable");
+        const everyNthFrame = Math.max(1, Math.round(60 / Math.max(1, this.fps)));
+        await cdp.send("Page.startScreencast", {
+          format: "jpeg",
+          quality: this.jpegQuality,
+          everyNthFrame,
+        });
+
+        cdp.on("Page.screencastFrame", async (evt: any) => {
           try {
-            opts.onClipboard && opts.onClipboard(payload);
-          } catch {}
-        }
-      );
+            this.deviceWidth = evt?.metadata?.deviceWidth || this.deviceWidth;
+            this.deviceHeight = evt?.metadata?.deviceHeight || this.deviceHeight;
+            this.pageScale = evt?.metadata?.pageScaleFactor || this.pageScale;
+            opts.onFrame(evt.data);
+            await cdp!.send("Page.screencastFrameAck", {
+              sessionId: evt.sessionId,
+            });
+          } catch (e) {
+            console.error("[rb] frame error:");
+            if (process.env.ENV !== "PROD" || !(e instanceof Error))
+              console.error(e);
+            else console.error(e.message);
+          }
+        });
 
-      // Attach listeners for current page and for all future docs
-      const injectClipboardHooks = () => `
+        await page.exposeFunction(
+          "__vwbClipboardOut",
+          (payload: { action: "copy" | "cut"; text: string }) => {
+            try {
+              opts.onClipboard && opts.onClipboard(payload);
+            } catch {}
+          }
+        );
+
+        const injectClipboardHooks = () => `
         (function(){
           function getSel() {
             try { return (window.getSelection && window.getSelection().toString()) || ""; } catch { return ""; }
@@ -129,20 +225,22 @@ export class RemoteBrowser {
         })();
       `;
 
-      await this.page!.evaluateOnNewDocument(injectClipboardHooks());
-      try {
-        await this.page!.evaluate(injectClipboardHooks());
-      } catch {}
-
-      // Optionally, hook frames as they navigate (best-effort same-origin)
-      this.page!.on("framenavigated", async (frame) => {
+        await page.evaluateOnNewDocument(injectClipboardHooks());
         try {
-          if (frame === this.page!.mainFrame()) return; // subframes only
-          await frame.evaluate(injectClipboardHooks());
+          await page.evaluate(injectClipboardHooks());
         } catch {}
-      });
 
-      this.running = true;
+        page.on("framenavigated", async (frame) => {
+          try {
+            if (frame === page.mainFrame()) return; // subframes only
+            await frame.evaluate(injectClipboardHooks());
+          } catch {}
+        });
+      }
+
+      // activate
+      this.page = { cid: key, page, cdp: cdp! };
+
       return true;
     } catch (e) {
       if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
@@ -155,18 +253,20 @@ export class RemoteBrowser {
     try {
       this.running = false;
       try {
-        if (this.cdp) {
+        for (const c of Object.values(this.cdps)) {
           try {
-            await this.cdp.send("Page.stopScreencast");
+            await c?.send("Page.stopScreencast");
           } catch {}
-          this.cdp = null;
         }
       } catch {}
       try {
         await this.browser?.close();
       } catch {}
       this.browser = null;
-      this.page = null;
+      this.pages = {};
+      this.cdps = {};
+      this.cid = null;
+      this.clipGranted = false;
       return true;
     } catch (e) {
       if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
@@ -194,9 +294,11 @@ export class RemoteBrowser {
   }
 
   /** Expose current CDP session (throws if not ready). */
-  getCDP(): any {
-    if (!this.cdp) throw new Error("NO_CDP");
-    return this.cdp;
+  getCDP(): CDPSession {
+    if (this.cid == null) throw new Error("NO_CDP");
+    const cdp = this.cdps[this.cid];
+    if (!cdp) throw new Error("NO_CDP");
+    return cdp;
   }
 
   /** Map canvas coords → DevTools CSS coords using last device metrics. */
@@ -246,8 +348,8 @@ export class RemoteBrowser {
 
   async captureFrame(): Promise<string> {
     try {
-      if (!this.cdp) throw new Error("NO_CDP");
-      const { data } = await this.cdp.send("Page.captureScreenshot", {
+      const cdp = this.getCDP();
+      const { data } = await cdp.send("Page.captureScreenshot", {
         format: "jpeg",
         quality: this.jpegQuality,
         fromSurface: true,
