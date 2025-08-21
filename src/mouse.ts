@@ -10,6 +10,9 @@ import type {
  * Inject mouse events using DevTools coordinates computed from either the full
  * canvas (1:1) or a displayed image rectangle.
  *
+ * @param rb Remote browser instance controlling the page.
+ * @param payload Mouse event data coming from the client.
+ * @returns Resolves to `true` when the event is dispatched.
  * @example
  * ```ts
  * await injectMousePptr(rb, {
@@ -84,6 +87,9 @@ export async function injectMousePptr(
 /**
  * Inject a mouse wheel event into the remote page.
  *
+ * @param rb Remote browser instance controlling the page.
+ * @param p Wheel event payload from the client.
+ * @returns Resolves to `true` if the event was sent; `false` otherwise.
  * @example
  * ```ts
  * await injectWheelPptr(rb, {

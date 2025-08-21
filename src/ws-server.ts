@@ -7,15 +7,10 @@ import expressWs, {
 } from "express-ws";
 import type { WebSocket } from "ws";
 
-import { RemoteBrowser } from "./remote-browser";
 import { createSingleFlow } from "./ws-single";
 import { createMultiFlow } from "./ws-multi";
-import type {
-  CreateWsServerOptions,
-  Flow,
-  FlowContext,
-  WsServerController,
-} from "./types";
+import { createSessionController } from "./ws-sessions";
+import type { CreateWsServerOptions, Flow, WsServerController } from "./types";
 
 /**
  * Create a WebSocket server that proxies input to a {@link RemoteBrowser} and
@@ -39,11 +34,6 @@ export function createWsServer(
   const clients = new Map<WebSocket, { cid: number }>();
   let nextCid = 1;
 
-  // --- RB + frame cache ---
-  const rb = new RemoteBrowser();
-  let rbStartP: Promise<true> | null = null;
-  const lastFrameRef = { value: null as string | null };
-
   // --- helpers ---
   const wsSend = (ws: WebSocket, msg: any) => {
     try {
@@ -59,43 +49,13 @@ export function createWsServer(
       } catch {}
     }
   };
-  const ensureRemoteBrowser = (): Promise<true> => {
-    if (rbStartP) return rbStartP;
-    rbStartP = rb
-      .start({
-        url: opts.url,
-        width: opts.width,
-        height: opts.height,
-        headful: opts.headful,
-        quality: opts.quality,
-        fps: opts.fps,
-        onFrame: (base64) => {
-          lastFrameRef.value = base64;
-          broadcast({ type: "frame", payload: base64 });
-        },
-        onClipboard: (ev) =>
-          broadcast({
-            type: "clipboard",
-            payload: { action: ev.action, text: ev.text || "" },
-          }),
-      })
-      .then((r) => {
-        console.log("[vwb] RemoteBrowser started");
-        return r;
-      })
-      .catch((e) => {
-        rbStartP = null;
-        throw e;
-      });
-    return rbStartP;
-  };
-  const getMetrics = () => {
-    try {
-      const m = (rb as any).getMetrics?.();
-      if (m && m.deviceWidth && m.deviceHeight) return m;
-    } catch {}
-    return { deviceWidth: opts.width, deviceHeight: opts.height };
-  };
+
+  const sessions = createSessionController({ ...opts, wsSend, broadcast });
+  const sharedSession = sessions.get();
+  const rb = sharedSession.rb;
+  const ensureRemoteBrowser = sharedSession.ensureRemoteBrowser;
+  const lastFrameRef = sharedSession.lastFrameRef;
+  const getMetrics = sharedSession.getMetrics;
 
   // --- auth ---
   const isAuthorized = (reqUrl?: string) => {
@@ -118,18 +78,21 @@ export function createWsServer(
   });
 
   // --- Flow switcher ---
-  let flow: Flow = createSingleFlow({
-    opts,
-    rb,
-    ensureRemoteBrowser,
-    clients,
-    wsSend,
-    broadcast,
-    lastFrameRef,
-    getMetrics,
-  });
+  let flow: Flow | null = null;
+  if (!opts.isolate)
+    flow = createSingleFlow({
+      opts,
+      rb,
+      ensureRemoteBrowser,
+      clients,
+      wsSend,
+      broadcast,
+      lastFrameRef,
+      getMetrics,
+    });
 
   const recomputeFlow = () => {
+    if (opts.isolate || !flow) return;
     try {
       const want = clients.size > 1 ? "multi" : "single";
       if (flow.name === want) return;
@@ -178,47 +141,102 @@ export function createWsServer(
 
     const cid = nextCid++;
     clients.set(ws as unknown as WebSocket, { cid });
-    recomputeFlow();
 
-    // delegate
-    try {
-      flow.onConnect(ws as any, cid);
-    } catch {}
+    if (opts.isolate) {
+      const session = sessions.get(ws as any);
+      const localClients = new Map<WebSocket, { cid: number }>([
+        [ws as any, { cid }],
+      ]);
+      const flowLocal = createSingleFlow({
+        opts,
+        rb: session.rb,
+        ensureRemoteBrowser: session.ensureRemoteBrowser,
+        clients: localClients,
+        wsSend,
+        broadcast: (msg: any) => wsSend(ws as any, msg),
+        lastFrameRef: session.lastFrameRef,
+        getMetrics: session.getMetrics,
+      });
+      flowLocal.onSwitchIn();
 
-    // route messages
-    ws.on("message", async (raw) => {
-      try {
-        const s = typeof raw === "string" ? raw : raw.toString();
-        const msg = JSON.parse(s);
-        if (!msg || typeof msg !== "object" || typeof msg.type !== "string")
-          return;
-        await flow.onMessage(ws as any, cid, msg);
-      } catch {
-        wsSend(ws as any, {
-          type: "error",
-          payload: { code: "BAD_MSG", message: "Invalid message" },
-        });
-      }
-    });
+      ws.on("message", async (raw) => {
+        try {
+          const s = typeof raw === "string" ? raw : raw.toString();
+          const msg = JSON.parse(s);
+          if (!msg || typeof msg !== "object" || typeof msg.type !== "string")
+            return;
+          await flowLocal.onMessage(ws as any, cid, msg);
+        } catch {
+          wsSend(ws as any, {
+            type: "error",
+            payload: { code: "BAD_MSG", message: "Invalid message" },
+          });
+        }
+      });
 
-    ws.on("close", () => {
-      clients.delete(ws as unknown as WebSocket);
+      ws.on("close", () => {
+        clients.delete(ws as unknown as WebSocket);
+        sessions.remove(ws as any);
+        try {
+          flowLocal.onDisconnect(ws as any, cid);
+        } catch {}
+      });
+
+      ws.on("error", () => {
+        clients.delete(ws as unknown as WebSocket);
+        try {
+          /* @ts-ignore */ ws.close();
+        } catch {}
+        sessions.remove(ws as any);
+        try {
+          flowLocal.onDisconnect(ws as any, cid);
+        } catch {}
+      });
+    } else {
       recomputeFlow();
-      try {
-        flow.onDisconnect(ws as any, cid);
-      } catch {}
-    });
 
-    ws.on("error", () => {
-      clients.delete(ws as unknown as WebSocket);
+      // delegate
       try {
-        /* @ts-ignore */ ws.close();
+        flow!.onConnect(ws as any, cid);
       } catch {}
-      recomputeFlow();
-      try {
-        flow.onDisconnect(ws as any, cid);
-      } catch {}
-    });
+
+      // route messages
+      ws.on("message", async (raw) => {
+        try {
+          const s = typeof raw === "string" ? raw : raw.toString();
+          const msg = JSON.parse(s);
+          if (!msg || typeof msg !== "object" || typeof msg.type !== "string")
+            return;
+          await flow!.onMessage(ws as any, cid, msg);
+        } catch {
+          wsSend(ws as any, {
+            type: "error",
+            payload: { code: "BAD_MSG", message: "Invalid message" },
+          });
+        }
+      });
+
+      ws.on("close", () => {
+        clients.delete(ws as unknown as WebSocket);
+        sessions.remove(ws as any);
+        recomputeFlow();
+        try {
+          flow!.onDisconnect(ws as any, cid);
+        } catch {}
+      });
+
+      ws.on("error", () => {
+        clients.delete(ws as unknown as WebSocket);
+        try {
+          /* @ts-ignore */ ws.close();
+        } catch {}
+        sessions.remove(ws as any);
+        recomputeFlow();
+        try {
+          flow!.onDisconnect(ws as any, cid);
+        } catch {}
+      });
+    }
   };
 
   (wsApp as unknown as WsApplication).ws("/ws", wsHandler);
@@ -232,10 +250,7 @@ export function createWsServer(
         } catch {}
       }
       clients.clear();
-      try {
-        if (rbStartP) await rb.stop();
-      } catch {}
-      rbStartP = null;
+      await sessions.stopAll();
       console.log("[vwb] WS server stopped");
     } catch (e) {
       if (process.env.ENV !== "PROD" || !(e instanceof Error)) console.error(e);
