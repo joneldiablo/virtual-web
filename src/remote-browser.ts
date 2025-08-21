@@ -26,8 +26,7 @@ export class RemoteBrowser {
   private browser: Browser | null = null;
   private pages: Page[] = [];
   private cdps: CDPSession[] = [];
-  private _page: Page | null = null;
-  private cdp: CDPSession | null = null;
+  private cid: number | null = null;
   private running = false;
 
   private deviceWidth = 1280;
@@ -39,15 +38,23 @@ export class RemoteBrowser {
 
   private clipGranted = false; // track permissions
 
-  /** Active page accessor. Stores page by cid when provided via setter. */
+  /**
+   * Active page accessor. Stores the page and CDP session by client id and
+   * tracks the last active client.
+   *
+   * @example
+   * ```ts
+   * rb.page = { cid: 1, page, cdp };
+   * const current = rb.page; // returns the page for client 1
+   * ```
+   */
   set page(data: { cid: number; page: Page; cdp: CDPSession }) {
     this.pages[data.cid] = data.page;
     this.cdps[data.cid] = data.cdp;
-    this._page = data.page;
-    this.cdp = data.cdp;
+    this.cid = data.cid;
   }
   get page(): Page | null {
-    return this._page;
+    return this.cid != null ? this.pages[this.cid] ?? null : null;
   }
 
   /** Retrieve a page stored for a specific client id. */
@@ -64,10 +71,7 @@ export class RemoteBrowser {
       } catch {}
       delete this.pages[cid];
       delete this.cdps[cid];
-      if (this._page === p) {
-        this._page = null;
-        this.cdp = null;
-      }
+      if (this.cid === cid) this.cid = null;
     }
   }
 
@@ -248,10 +252,9 @@ export class RemoteBrowser {
         await this.browser?.close();
       } catch {}
       this.browser = null;
-      this._page = null;
-      this.cdp = null;
       this.pages = [];
       this.cdps = [];
+      this.cid = null;
       this.clipGranted = false;
       return true;
     } catch (e) {
@@ -280,9 +283,11 @@ export class RemoteBrowser {
   }
 
   /** Expose current CDP session (throws if not ready). */
-  getCDP(): any {
-    if (!this.cdp) throw new Error("NO_CDP");
-    return this.cdp;
+  getCDP(): CDPSession {
+    if (this.cid == null) throw new Error("NO_CDP");
+    const cdp = this.cdps[this.cid];
+    if (!cdp) throw new Error("NO_CDP");
+    return cdp;
   }
 
   /** Map canvas coords → DevTools CSS coords using last device metrics. */
@@ -332,8 +337,8 @@ export class RemoteBrowser {
 
   async captureFrame(): Promise<string> {
     try {
-      if (!this.cdp) throw new Error("NO_CDP");
-      const { data } = await this.cdp.send("Page.captureScreenshot", {
+      const cdp = this.getCDP();
+      const { data } = await cdp.send("Page.captureScreenshot", {
         format: "jpeg",
         quality: this.jpegQuality,
         fromSurface: true,
