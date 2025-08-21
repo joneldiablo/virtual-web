@@ -106,7 +106,7 @@ export function createWsServer(
               payload: { action: ev.action, text: ev.text || "" },
             }),
         });
-      return true;
+      return true as const;
     });
   };
   const getMetrics = () => {

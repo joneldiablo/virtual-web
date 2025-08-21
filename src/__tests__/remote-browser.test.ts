@@ -1,3 +1,6 @@
+// Mock puppeteer dependency
+jest.mock("puppeteer", () => ({ launch: jest.fn() }));
+
 import { RemoteBrowser } from "../remote-browser";
 import type { Page } from "puppeteer";
 
