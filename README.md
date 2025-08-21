@@ -70,3 +70,14 @@ To give every client its own browser instance:
 ts-node src/cli.ts --url https://example.com --port 8080 --isolate
 ```
 
+## Testing
+
+- Unit tests cover session controller behavior, keyboard and clipboard helpers, and mouse input (including wheel events) to ensure coordinate mapping and input handling work as expected.
+- Run tests with coverage:
+
+```bash
+yarn test --coverage
+```
+
+Current coverage is roughly 80% of the TypeScript source.
+
