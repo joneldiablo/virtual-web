@@ -1,6 +1,6 @@
 {
   "name": "virtual-web-browser",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Virtual Web Browser",
   "engines": {
     "node": ">=18"
@@ -65,6 +65,12 @@
       "require": "./dist/cjs/ws-server.js",
       "types": "./dist/types/ws-server.d.ts",
       "source": "./src/js/ws-server.ts"
+    },
+    "./ws-sessions": {
+      "import": "./dist/esm/ws-sessions.js",
+      "require": "./dist/cjs/ws-sessions.js",
+      "types": "./dist/types/ws-sessions.d.ts",
+      "source": "./src/js/ws-sessions.ts"
     },
     "./ws-single": {
       "import": "./dist/esm/ws-single.js",
