@@ -105,14 +105,15 @@ const main = async (cli: CliArgs) => {
         console.log(`[vwb] Caught ${sig}`);
         await wsCtrl.stop();
         await httpCtrl.stop();
-        process.exit(0);
+        console.log("[vwb] shutdown");
       } catch (e: unknown) {
         console.error("Unknown error on shutdown:");
         if (process.env.ENV !== "PROD" || !(e instanceof Error))
           console.error(e);
         else console.error(e.message);
-        process.exit(1);
       }
+      console.log("\n\n");
+      process.exit(sig);
     };
 
     process.on("SIGINT", () => handleSignal("SIGINT"));
