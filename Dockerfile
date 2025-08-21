@@ -44,6 +44,7 @@ RUN yarn install --production --frozen-lockfile
 # Copiamos SOLO artefactos necesarios desde el builder
 COPY --chown=pptruser:pptruser --from=builder /app/dist ./dist
 COPY --chown=pptruser:pptruser --from=builder /app/bin ./bin
+COPY --chown=pptruser:pptruser --from=builder /app/public ./public
 
 EXPOSE 8085
 
