@@ -15,6 +15,7 @@ import type { RemoteBrowser } from "./remote-browser";
  *   quality: 60,
  *   fps: 30,
  *   headful: false,
+ *   isolate: false,
  *   width: 1280,
  *   height: 720,
  *   token: "",
@@ -30,6 +31,8 @@ export interface CliArgs {
   quality: number;
   fps: number;
   headful: boolean;
+  /** Whether each WebSocket client receives an isolated browser page */
+  isolate: boolean;
   width: number;
   height: number;
   token: string;
@@ -49,6 +52,7 @@ export interface CliArgs {
  *   width: 1280,
  *   height: 720,
  *   headful: false,
+ *   isolate: false,
  *   quality: 60,
  *   fps: 30,
  *   onFrame: (img) => console.log(img.slice(0, 20)),
@@ -60,6 +64,8 @@ export interface RemoteBrowserStartOptions {
   width: number;
   height: number;
   headful: boolean;
+  /** Run the browser in isolated mode (no effect yet) */
+  isolate: boolean;
   quality: number;
   fps: number;
   onFrame: (base64: string) => void;
@@ -187,6 +193,8 @@ export interface CreateWsServerOptions {
   token?: string;
 
   url: string;
+  /** When true each WS client uses a dedicated page */
+  isolate: boolean;
   width: number;
   height: number;
   headful: boolean;

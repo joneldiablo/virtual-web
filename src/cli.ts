@@ -40,6 +40,17 @@ const args = yargs(hideBin(process.argv))
         : false,
     describe: "Launch Chromium UI (reserved)",
   })
+  .option("isolate", {
+    type: "boolean",
+    default:
+      typeof process.env.ISOLATE === "string"
+        ? ["1", "true", "yes", "on"].includes(
+            process.env.ISOLATE.toLowerCase()
+          )
+        : false,
+    describe:
+      "Give each WebSocket client its own page (no effect yet)",
+  })
   .option("width", {
     type: "number",
     default: Number(process.env.WIDTH) || 1280,
@@ -93,6 +104,7 @@ const main = async (cli: CliArgs) => {
       server: httpCtrl.server,
       token: cli.token,
       url: cli.url,
+      isolate: cli.isolate,
       width: cli.width,
       height: cli.height,
       headful: cli.headful,
