@@ -115,7 +115,9 @@ export function createMultiFlow(ctx: FlowContext): Flow {
       sendMode();
     },
 
-    onMessage: async (ws, _cidFromBase, msg) => {
+    onMessage: async (ws, baseCid, msg) => {
+      // Determine the client id either from the registry or the base handler
+      const cid = ctx.clients.get(ws as any)?.cid ?? baseCid;
       try {
         switch (msg.type) {
           case "ping": {
@@ -226,7 +228,7 @@ export function createMultiFlow(ctx: FlowContext): Flow {
           case "mouse": {
             await ctx.ensureRemoteBrowser(cid, ws);
             await injectMousePptr(ctx.rb, msg.payload);
-            broadcastCursor(ctx.clients.get(ws as any)?.cid!, msg.payload);
+            broadcastCursor(cid, msg.payload);
             break;
           }
 
