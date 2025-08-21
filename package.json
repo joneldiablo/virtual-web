@@ -94,7 +94,7 @@
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:bin": "rm -rf bin/* && webpack",
     "build": "rm -rf dist/* && yarn build:cjs && yarn build:esm && yarn build:bin && typedoc",
-    "test": "jest",
+    "test": "jest --coverage",
     "test:e2e": "jest --config ./e2e/jest-e2e.json --forceExit",
     "release": "./release.sh"
   },
