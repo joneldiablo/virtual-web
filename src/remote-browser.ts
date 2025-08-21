@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-import puppeteer, { Browser, Page } from "puppeteer";
+import puppeteer, { Browser, CDPSession, Page } from "puppeteer";
 import type { RemoteBrowserStartOptions } from "./types";
 
 /**
@@ -25,7 +25,7 @@ import type { RemoteBrowserStartOptions } from "./types";
 export class RemoteBrowser {
   private browser: Browser | null = null;
   private page: Page | null = null;
-  private cdp: any | null = null;
+  private cdp: CDPSession | null = null;
   private running = false;
 
   private deviceWidth = 1280;
@@ -51,8 +51,16 @@ export class RemoteBrowser {
         },
       });
 
-      const ctx = await this.browser.createBrowserContext();
-      this.page = await ctx.newPage();
+      this.browser.on("disconnected", () => {
+        console.error("[vwb] Browser closed -> shutting down program");
+        throw new Error("BROWSER_IS_GONE");
+      });
+
+      const pages = Array.from(await this.browser.pages());
+      this.page = pages.shift() || (await this.browser.newPage());
+      // --- close other pages, not need await it
+      pages.map((p) => p.close());
+
       await this.page.goto(opts.url, { waitUntil: "domcontentloaded" });
 
       // CDP session + screencast
