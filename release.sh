@@ -60,8 +60,7 @@ else
   echo "Already on master branch. No merge needed."
 fi
 
-# builds
-yarn build
+yarn test && yarn build
 
 # Check if build was successful
 if [ $? -ne 0 ]; then
